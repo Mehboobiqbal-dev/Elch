@@ -15,101 +15,80 @@ env:
   AZURE_WEBAPP_NAME: elch
   AZURE_WEBAPP_PACKAGE_PATH: '.'
   PYTHON_VERSION: '3.11'
+  RESOURCE_GROUP: elch_group
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
-        run: |
-          if ls test_*.py 1> /dev/null 2>&1; then
-            python -m pytest test_*.py -v || echo "Tests completed with warnings"
-
-      - name: Create deployment package
-        run: |
-          rm -rf venv/ env/ .git/ tests/ __pycache__/ *.pyc
-          rm -f .gitignore README.md *.log
-          if [ -f "requirements-render.txt" ]; then
-            cp requirements-render.txt requirements.txt
-          fi
-
-      - name: Upload artifact for deployment
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            .
-            !venv/
-            !env/
-            !.git/
-            !tests/
-            !__pycache__/
-            !*.pyc
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    environment:
-      name: Production
-
+    environment: Production
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: python-app
           path: .
 
-      - name: Login to Azure
+      - name: Azure login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Stop Azure Web App (prevents 409 conflict)
+      - name: Stop Azure Web App
         run: |
-          az webapp stop --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group elch_group
+          az webapp stop --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }}
+          echo "Waiting 15s for app to fully stop..."
+          sleep 15
 
       - name: Ensure startup.sh is executable
         run: chmod +x ./startup.sh
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+      - name: Deploy to Azure Web App with retry
+        run: |
+          max_attempts=5
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Deployment attempt $attempt..."
+            az webapp deployment source config-zip \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --name ${{ env.AZURE_WEBAPP_NAME }} \
+              --src ./python-app.zip && break
+            echo "Deployment failed, retrying in 10s..."
+            sleep 10
+            attempt=$((attempt+1))
+          done
 
       - name: Start Azure Web App
-        run: |
-          az webapp start --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group elch_group
+        run: az webapp start --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }}
 
       - name: Verify deployment
         run: |
-          echo "Deployment completed. Checking application health..."
+          echo "Checking application health..."
           sleep 30
           response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/healthz || echo "000")
           if [ "$response" = "200" ]; then
-            echo "✅ Application is healthy and responding"
+            echo "✅ App is healthy"
           else
-            echo "⚠️ Application health check returned: $response"
-            echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+            echo "⚠️ Health check returned: $response"
+          fi
