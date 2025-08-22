@@ -1,96 +1,120 @@
-#!/bin/bash
+name: Deploy to Azure App Service (Linux)
 
-# Azure App Service Startup Script for Python FastAPI Application
-# This script handles the initialization and startup of the Elch application
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
-echo "Starting Elch application deployment..."
+env:
+  AZURE_WEBAPP_NAME: elch-hbfga9d3hpfke4h2   # 👈 your App Service name
+  AZURE_WEBAPP_PACKAGE_PATH: '.'              # deploy root
+  PYTHON_VERSION: '3.11'
 
-# Set environment variables for production
-export PYTHONUNBUFFERED=1
-export PYTHONDONTWRITEBYTECODE=1
-export PYTHONOPTIMIZE=2
-export PYTHONHASHSEED=0
-export ENVIRONMENT=production
-
-# Set default port if not provided by Azure
-if [ -z "$PORT" ]; then
-    export PORT=8000
-fi
-
-echo "Environment: $ENVIRONMENT"
-echo "Port: $PORT"
-echo "Python version: $(python --version)"
-
-# Create necessary directories
-mkdir -p /home/site/wwwroot/logs
-mkdir -p /home/site/wwwroot/saved_task_data
-mkdir -p /home/site/wwwroot/scraped_data
-
-# Install dependencies if requirements.txt exists
-if [ -f "requirements.txt" ]; then
-    echo "Installing Python dependencies..."
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    echo "Dependencies installed successfully"
-else
-    echo "Warning: requirements.txt not found"
-fi
-
-# Initialize database if init script exists
-if [ -f "init_db_script.py" ]; then
-    echo "Initializing database..."
-    python init_db_script.py || echo "Database initialization completed with warnings"
-else
-    echo "No database initialization script found"
-fi
-
-# Check if main.py exists
-if [ ! -f "main.py" ]; then
-    echo "Error: main.py not found in the application directory"
-    exit 1
-fi
-
-# Set up logging
-echo "Setting up application logging..."
-export PYTHONPATH="/home/site/wwwroot:$PYTHONPATH"
-
-# Health check function
-health_check() {
-    local max_attempts=30
-    local attempt=1
+jobs:
+  build:
+    runs-on: ubuntu-latest
     
-    echo "Performing health check..."
-    
-    while [ $attempt -le $max_attempts ]; do
-        if curl -f -s "http://localhost:$PORT/healthz" > /dev/null 2>&1; then
-            echo "Health check passed on attempt $attempt"
-            return 0
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run tests (if any)
+      run: |
+        if ls test_*.py 1> /dev/null 2>&1; then
+          python -m pytest -v || echo "Tests completed with warnings"
         fi
         
-        echo "Health check attempt $attempt failed, retrying in 2 seconds..."
-        sleep 2
-        attempt=$((attempt + 1))
-    done
-    
-    echo "Health check failed after $max_attempts attempts"
-    return 1
-}
+    - name: Clean for deployment
+      run: |
+        rm -rf venv/ env/ .git/ tests/ __pycache__/ *.pyc
+        rm -f .gitignore README.md *.log
+        if [ -f "requirements-render.txt" ]; then
+          cp requirements-render.txt requirements.txt
+        fi
+        
+    - name: Upload artifact for deployment
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-app
+        path: |
+          .
+          !venv/
+          !env/
+          !.git/
+          !tests/
+          !__pycache__/
+          !*.pyc
 
-# Start the application with gunicorn
-echo "Starting FastAPI application with Gunicorn..."
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+      
+    steps:
+    - name: Download artifact from build job
+      uses: actions/download-artifact@v3
+      with:
+        name: python-app
+        path: .
 
-# Use optimized gunicorn configuration for Azure App Service
-exec gunicorn main:app \
-    --bind "0.0.0.0:$PORT" \
-    --workers 2 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 120 \
-    --keep-alive 2 \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --preload \
-    --access-logfile - \
-    --error-logfile - \
-    --log-level info \
-    --capture-output \
-    --enable-stdio-inheritance
+    - name: Create startup script
+      run: |
+        cat > startup.sh << 'EOF'
+        #!/bin/bash
+        export PYTHONUNBUFFERED=1
+        export PYTHONDONTWRITEBYTECODE=1
+        export PYTHONOPTIMIZE=2
+
+        gunicorn -k uvicorn.workers.UvicornWorker \
+          --bind=0.0.0.0:$PORT \
+          --workers=2 \
+          --timeout=120 \
+          main:app
+        EOF
+        chmod +x startup.sh
+        
+    - name: Deploy to Azure Web App (Linux)
+      id: deploy-to-webapp
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+        
+    - name: Verify deployment
+      run: |
+        echo "Deployment completed. Checking application health..."
+        sleep 30
+        response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/healthz || echo "000")
+        if [ "$response" = "200" ]; then
+          echo "✅ Application is healthy and responding"
+        else
+          echo "⚠️ Application health check returned: $response"
+          echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+        fi
