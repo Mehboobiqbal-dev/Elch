@@ -1,178 +1,52 @@
-name: Deploy to Azure App Service
-
-on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
-
-env:
-  AZURE_WEBAPP_NAME: elch-hbfga9d3hpfke4h2
-  AZURE_WEBAPP_PACKAGE_PATH: '.'
-  PYTHON_VERSION: '3.11'
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+deploy:
+  runs-on: windows-latest   # ✅ instead of ubuntu-latest
+  needs: build
+  environment:
+    name: 'Production'
+    url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
       
-    - name: Set up Python ${{ env.PYTHON_VERSION }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-          
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Run tests
-      run: |
-        # Run any existing tests
-        if [ -f "test_*.py" ]; then
-          python -m pytest test_*.py -v || echo "Tests completed with warnings"
-        fi
-        
-    - name: Create deployment package
-      run: |
-        # Remove unnecessary files for deployment
-        rm -rf venv/ env/ .git/ tests/ __pycache__/ *.pyc
-        rm -f .gitignore README.md *.log
-        
-        # Create a clean requirements file for production
-        if [ -f "requirements-render.txt" ]; then
-          cp requirements-render.txt requirements.txt
-        fi
-        
-    - name: Upload artifact for deployment
-      uses: actions/upload-artifact@v3
-      with:
-        name: python-app
-        path: |
-          .
-          !venv/
-          !env/
-          !.git/
-          !tests/
-          !__pycache__/
-          !*.pyc
+  steps:
+  - name: Download artifact from build job
+    uses: actions/download-artifact@v3
+    with:
+      name: python-app
+      path: .
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-      
-    steps:
-    - name: Download artifact from build job
-      uses: actions/download-artifact@v3
-      with:
-        name: python-app
-        path: .
-        
-    - name: Create startup script
-      run: |
-        cat > startup.sh << 'EOF'
-        #!/bin/bash
-        
-        # Set environment variables
-        export PYTHONUNBUFFERED=1
-        export PYTHONDONTWRITEBYTECODE=1
-        export PYTHONOPTIMIZE=2
-        
-        # Install dependencies if not already installed
-        if [ ! -d "/home/site/wwwroot/venv" ]; then
-          python -m venv /home/site/wwwroot/venv
-          source /home/site/wwwroot/venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-        else
-          source /home/site/wwwroot/venv/bin/activate
-        fi
-        
-        # Initialize database if needed
-        if [ -f "init_db_script.py" ]; then
-          python init_db_script.py || echo "Database initialization completed"
-        fi
-        
-        # Start the application
-        if [ -f "start-render-optimized.sh" ]; then
-          chmod +x start-render-optimized.sh
-          ./start-render-optimized.sh
-        else
-          gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 main:app
-        fi
-        EOF
-        chmod +x startup.sh
-        
-    - name: Create web.config for Azure
-      run: |
-        cat > web.config << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <configuration>
-          <system.webServer>
-            <handlers>
-              <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
-            </handlers>
-            <httpPlatform processPath="D:\home\Python311\python.exe"
-                          arguments="-m gunicorn --bind 0.0.0.0:%HTTP_PLATFORM_PORT% --workers 2 --timeout 120 main:app"
-                          stdoutLogEnabled="true"
-                          stdoutLogFile="D:\home\LogFiles\python.log"
-                          startupTimeLimit="60"
-                          requestTimeout="00:04:00">
-              <environmentVariables>
-                <environmentVariable name="PYTHONUNBUFFERED" value="1" />
-                <environmentVariable name="PYTHONDONTWRITEBYTECODE" value="1" />
-                <environmentVariable name="PYTHONOPTIMIZE" value="2" />
-              </environmentVariables>
-            </httpPlatform>
-          </system.webServer>
-        </configuration>
-        EOF
-        
-    - name: Deploy to Azure Web App
-      id: deploy-to-webapp
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: ${{ env.AZURE_WEBAPP_NAME }}
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
-        
-    - name: Verify deployment
-      run: |
-        echo "Deployment completed. Checking application health..."
-        sleep 30
-        
-        # Check if the application is responding
-        response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/healthz || echo "000")
-        
-        if [ "$response" = "200" ]; then
-          echo "✅ Application is healthy and responding"
-        else
-          echo "⚠️ Application health check returned: $response"
-          echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
-        fi
-        
-    - name: Post-deployment cleanup
-      if: always()
-      run: |
-        echo "Deployment process completed"
-        echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
-        echo "Logs can be found in Azure Portal under App Service Logs"
+  - name: Create startup script
+    run: |
+      echo @echo off > startup.bat
+      echo set PYTHONUNBUFFERED=1 >> startup.bat
+      echo set PYTHONDONTWRITEBYTECODE=1 >> startup.bat
+      echo set PYTHONOPTIMIZE=2 >> startup.bat
+      echo python -m gunicorn --bind 0.0.0.0:%PORT% --workers 2 main:app >> startup.bat
+
+  - name: Create web.config for Azure
+    run: |
+      echo ^<?xml version="1.0" encoding="utf-8"?^> > web.config
+      echo ^<configuration^> >> web.config
+      echo   ^<system.webServer^> >> web.config
+      echo     ^<handlers^> >> web.config
+      echo       ^<add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/^> >> web.config
+      echo     ^</handlers^> >> web.config
+      echo     ^<httpPlatform processPath="D:\home\Python311\python.exe" arguments="-m gunicorn --bind 0.0.0.0:%%HTTP_PLATFORM_PORT%% --workers 2 --timeout 120 main:app" stdoutLogEnabled="true" stdoutLogFile="D:\home\LogFiles\python.log" startupTimeLimit="60" requestTimeout="00:04:00"^> >> web.config
+      echo       ^<environmentVariables^> >> web.config
+      echo         ^<environmentVariable name="PYTHONUNBUFFERED" value="1" /^> >> web.config
+      echo         ^<environmentVariable name="PYTHONDONTWRITEBYTECODE" value="1" /^> >> web.config
+      echo         ^<environmentVariable name="PYTHONOPTIMIZE" value="2" /^> >> web.config
+      echo       ^</environmentVariables^> >> web.config
+      echo     ^</httpPlatform^> >> web.config
+      echo   ^</system.webServer^> >> web.config
+      echo ^</configuration^> >> web.config
+
+  - name: Deploy to Azure Web App
+    id: deploy-to-webapp
+    uses: azure/webapps-deploy@v2
+    with:
+      app-name: ${{ env.AZURE_WEBAPP_NAME }}
+      publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+      package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+  - name: Verify deployment
+    run: |
+      echo "Deployment completed. Checking application health..."
+      curl -s -o nul -w "HTTP Status: %{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/healthz
