@@ -1,0 +1,72 @@
+services:
+  - type: web
+    name: elch-backend
+    env: python
+    plan: free  # Use 'free' for free tier
+    region: oregon  # Specify region for better performance
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install --no-cache-dir -r requirements-render.txt
+      python -c "import sys; print(f'Python version: {sys.version}')"
+    startCommand: |
+      chmod +x start-render-optimized.sh
+      ./start-render-optimized.sh
+    healthCheckPath: /healthz
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: RELOAD
+        value: false
+      - key: WORKERS
+        value: 4
+      - key: HOST
+        value: 0.0.0.0
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: SESSION_SECRET
+        generateValue: true  # Render will generate a secure secret
+      - key: FERNET_KEY
+        generateValue: true  # Render will generate a secure key
+      - key: CIRCUIT_BREAKER_FAILURE_THRESHOLD
+        value: 5
+      - key: CIRCUIT_BREAKER_RECOVERY_TIMEOUT
+        value: 60
+      - key: MAX_RETRIES
+        value: 3
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 60
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ENABLE_PERFORMANCE_MONITORING
+        value: true
+      - key: ENABLE_SELF_LEARNING
+        value: true
+      - key: ENABLE_LOCAL_EMBEDDINGS
+        value: false  # Disable for free tier to reduce memory usage
+      - key: ENABLE_MEMORY_OPTIMIZATIONS
+        value: true  # Enable memory optimizations
+      - key: LOCAL_EMBEDDING_MODEL
+        value: sentence-transformers/paraphrase-MiniLM-L3-v2  # Use smaller model if embeddings are enabled
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: elch-postgres
+          property: connectionString
+      # Required environment variables - set these in Render dashboard:
+      # - GEMINI_API_KEYS (your Gemini API keys, comma-separated)
+      # - GOOGLE_CLIENT_ID (optional, for OAuth)
+      # - GOOGLE_CLIENT_SECRET (optional, for OAuth)
+      # - OPENAI_API_KEY (optional, for OpenAI integration)
+
+databases:
+  - name: elch-postgres
+    plan: free  # Use free tier
+    databaseName: elch_db
+    user: elch_user
