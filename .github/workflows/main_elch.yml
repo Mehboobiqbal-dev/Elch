@@ -1,4 +1,4 @@
-name: Deploy to Azure App Service
+name: Deploy to Azure App Service (robust, retries, handles 409)
 
 on:
   push:
@@ -8,59 +8,68 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: elch
-  AZURE_WEBAPP_PACKAGE_PATH: '.'
   AZURE_RESOURCE_GROUP: elch_group
+  PACKAGE_NAME: package.zip
   PYTHON_VERSION: '3.11'
+  HEALTH_PATH: "/healthz"    # change if your health endpoint differs
+  MAX_DEPLOY_RETRIES: 6
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      package-path: ${{ steps.make-package.outputs.package-path }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: Install dependencies (optional - for tests / packaging)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run tests safely
         run: |
           shopt -s nullglob
           files=(test_*.py)
           if [ ${#files[@]} -gt 0 ]; then
-            python -m pytest "${files[@]}" -v || echo "Tests completed with warnings"
+            python -m pytest "${files[@]}" -q || echo "Tests completed with warnings"
           else
             echo "No test files found, skipping tests"
           fi
 
-      - name: Upload artifact
+      - name: Create deployment ZIP package
+        id: make-package
+        run: |
+          set -euo pipefail
+          PKG="${{ env.PACKAGE_NAME }}"
+          echo "Creating deployment package: $PKG"
+          # Ensure clean package
+          rm -f "$PKG"
+          # Use zip but exclude common folders/files (adjust as needed)
+          zip -r "$PKG" . -x "venv/*" "env/*" ".git/*" "tests/*" "__pycache__/*" "*.pyc" ".github/*" "node_modules/*" || true
+          echo "::set-output name=package-path::$PWD/$PKG"
+
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-app
-          path: |
-            .
-            !venv/
-            !env/
-            !.git/
-            !tests/
-            !__pycache__/
-            !*.pyc
+          name: python-app-zip
+          path: ${{ steps.make-package.outputs.package-path }}
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-
     steps:
-      - name: Download artifact
+      - name: Download artifact (zip)
         uses: actions/download-artifact@v4
         with:
-          name: python-app
+          name: python-app-zip
           path: .
 
       - name: Login to Azure
@@ -68,34 +77,146 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Stop Azure Web App (prevents 409 conflict)
+      - name: Ensure az webapp extension present (no-op on latest CLI)
+        run: az version
+
+      - name: Stop Web App (prevents file lock)
+        id: stop_app
         run: |
-          az webapp stop --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+          set -euo pipefail
+          echo "Stopping web app $AZURE_WEBAPP_NAME..."
+          az webapp stop --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+          # wait until state is Stopped (timeout 60s)
+          for i in  {1..30}; do
+            state=$(az webapp show --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "state" -o tsv)
+            echo "App state: $state"
+            if [ "$state" = "Stopped" ] || [ "$state" = "stopped" ]; then
+              echo "App stopped"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Warning: app did not report stopped after wait; continuing anyway"
 
-      - name: Delete deployment source (removes GitHub Actions lock)
+      - name: Delete deployment source (remove GH Action locks)
         run: |
-          az webapp deployment source delete --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+          set -euo pipefail
+          echo "Deleting deployment source (if present)..."
+          az webapp deployment source delete --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" || echo "No deployment source or delete failed (ok)"
 
-      - name: Ensure startup.sh is executable
-        run: chmod +x ./startup.sh
+      - name: Clear previous deployments (best-effort)
+        run: |
+          set -euo pipefail
+          echo "Listing deployments..."
+          deployments=$(az webapp deployment list --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" -o json || echo "[]")
+          if [ "$deployments" != "[]" ]; then
+            echo "$deployments" | jq -r '.[].id' | while read -r id; do
+              if [ -n "$id" ]; then
+                echo "Deleting deployment id: $id"
+                az webapp deployment delete --ids "$id" || echo "Failed to delete $id (continuing)"
+              fi
+            done
+          else
+            echo "No prior deployments found."
+          fi
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+      - name: Ensure startup.sh present and executable
+        run: |
+          set -euo pipefail
+          if [ ! -f ./startup.sh ]; then
+            echo "startup.sh not found — creating a default startup.sh"
+            cat > ./startup.sh <<'EOF'
+#!/bin/bash
+export PYTHONUNBUFFERED=1
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONOPTIMIZE=2
+# Adjust the command below if your entrypoint differs:
+exec gunicorn -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 2 --timeout 120 main:app
+EOF
+          fi
+          chmod +x ./startup.sh
+          echo "startup.sh ready"
+
+      - name: Deploy ZIP with retries and 409 handling
+        id: deploy_zip
+        run: |
+          set -euo pipefail
+          PKG="${{ env.PACKAGE_NAME }}"
+          RG="${{ env.AZURE_RESOURCE_GROUP }}"
+          APP="${{ env.AZURE_WEBAPP_NAME }}"
+          MAX_RETRIES=${{ env.MAX_DEPLOY_RETRIES }}
+          attempt=0
+          sleep_seconds=3
+
+          deploy_once() {
+            echo "Attempting ZIP deploy (config-zip) to $APP (pkg=$PKG)"
+            az webapp deployment source config-zip --resource-group "$RG" --name "$APP" --src "$PKG"
+          }
+
+          while [ $attempt -lt $MAX_RETRIES ]; do
+            attempt=$((attempt + 1))
+            echo "Deploy attempt #$attempt / $MAX_RETRIES"
+            if deploy_once; then
+              echo "Deploy succeeded on attempt #$attempt"
+              exit 0
+            else
+              rc=$?
+              echo "Deploy failed with exit code $rc"
+              # Try to detect 409 from last operation (look up last deployment status)
+              # Get Kudu deployment status (best-effort)
+              echo "Checking for conflict / running deployments..."
+              sleep 1
+              # If the HTTP response was 409, az CLI returns non-zero; check Kudu API for active deployments:
+              # Best-effort: if any deployment was very recent, try to delete them; otherwise backoff and retry
+              echo "Attempting to remove stuck deployments (best-effort)..."
+              set +e
+              ids=$(az webapp deployment list --name "$APP" --resource-group "$RG" -o tsv --query "[].id" 2>/dev/null || true)
+              set -e
+              if [ -n "$ids" ]; then
+                echo "Found deployments: $ids"
+                for id in $ids; do
+                  echo "Deleting deployment id: $id"
+                  az webapp deployment delete --ids "$id" || echo "delete failed (ignored)"
+                done
+              else
+                echo "No deployments found via az webapp deployment list"
+              fi
+
+              # Start the app (so the service is healthy) and then stop again to attempt release
+              echo "Restarting the app to clear locks, then stopping again..."
+              az webapp restart --name "$APP" --resource-group "$RG" || echo "restart failed (ignored)"
+              sleep 3
+              az webapp stop --name "$APP" --resource-group "$RG" || echo "stop failed (ignored)"
+              echo "Backing off $sleep_seconds seconds before next attempt..."
+              sleep $sleep_seconds
+              sleep_seconds=$(( sleep_seconds * 2 ))
+            fi
+          done
+
+          echo "All $MAX_RETRIES deploy attempts failed — exiting with error"
+          exit 1
 
       - name: Start Azure Web App
         run: |
-          az webapp start --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+          set -euo pipefail
+          az webapp start --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
 
-      - name: Verify deployment
+      - name: Verify deployment health (retry)
         run: |
-          echo "Deployment completed. Checking application health..."
-          sleep 30
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/healthz || echo "000")
-          if [ "$response" = "200" ]; then
-            echo "✅ Application is healthy and responding"
-          else
-            echo "⚠️ Application health check returned: $response"
-            echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          set -euo pipefail
+          URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net${{ env.HEALTH_PATH }}"
+          echo "Checking health endpoint: $URL"
+          tries=0
+          max=8
+          while [ $tries -lt $max ]; do
+            tries=$((tries+1))
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+            echo "HTTP status: $code (try #$tries/$max)"
+            if [ "$code" = "200" ]; then
+              echo "Application healthy"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "Health check failed (status $code). Check app logs in Azure Portal."
+          exit 1
