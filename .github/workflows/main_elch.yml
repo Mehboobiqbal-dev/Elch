@@ -46,7 +46,6 @@ jobs:
         run: |
           if ls test_*.py 1> /dev/null 2>&1; then
             python -m pytest test_*.py -v || echo "Tests completed with warnings"
-          fi
 
       - name: Create deployment package
         run: |
@@ -87,6 +86,10 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Stop Azure Web App (prevents 409 conflict)
+        run: |
+          az webapp stop --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group elch_group
+
       - name: Ensure startup.sh is executable
         run: chmod +x ./startup.sh
 
@@ -95,6 +98,10 @@ jobs:
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - name: Start Azure Web App
+        run: |
+          az webapp start --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group elch_group
 
       - name: Verify deployment
         run: |
@@ -106,4 +113,3 @@ jobs:
           else
             echo "⚠️ Application health check returned: $response"
             echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
-          fi
