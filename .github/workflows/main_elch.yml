@@ -29,10 +29,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run tests safely
         run: |
-          if ls test_*.py 1> /dev/null 2>&1; then
-            python -m pytest test_*.py -v || echo "Tests completed with warnings"
+          shopt -s nullglob
+          files=(test_*.py)
+          if [ ${#files[@]} -gt 0 ]; then
+            python -m pytest "${files[@]}" -v || echo "Tests completed with warnings"
+          else
+            echo "No test files found, skipping tests"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
