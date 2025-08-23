@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from authlib.integrations.starlette_client import OAuth
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
 from passlib.context import CryptContext
@@ -120,6 +120,7 @@ from auth import get_current_user
 # Configure logging for production
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+@contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         logging.info("Database initialization handled by init_db_script.py.")
@@ -142,7 +143,10 @@ async def lifespan(app: FastAPI):
     yield
     app.state.running = False
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()  # Temporarily disable lifespan for debugging
+
+# Create alias for uvicorn compatibility
+application = app
 
 active_connections: Dict[int, WebSocket] = {}
 
@@ -176,7 +180,7 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-def get_db():
+async def get_db():
     db = SessionLocal()
     try:
         yield db
@@ -189,7 +193,7 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -214,7 +218,16 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @app.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Run password verification in thread pool to avoid blocking async context
+    password_valid = await asyncio.to_thread(verify_password, form_data.password, user.hashed_password)
+    if not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

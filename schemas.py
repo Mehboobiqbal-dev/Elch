@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Union
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -53,7 +53,7 @@ class Step(BaseModel):
     step: int
     action: str
     status: str
-    details: dict | str
+    details: Union[dict, str]
 
 class PromptResponse(BaseModel):
     status: str

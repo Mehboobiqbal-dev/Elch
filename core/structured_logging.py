@@ -269,7 +269,9 @@ class StructuredLogger:
     
     def log_retry_attempt(self, operation: str, attempt: int, error: str, context: Optional[LogContext] = None):
         """Log retry attempt."""
-        retry_context = LogContext(retry_count=attempt, **(asdict(context) if context else {}))
+        context_dict = asdict(context) if context else {}
+        context_dict['retry_count'] = attempt  # Override retry_count to avoid duplicate keyword argument
+        retry_context = LogContext(**context_dict)
         self._log_structured(
             LogLevel.WARNING,
             EventType.RETRY_ATTEMPT,
