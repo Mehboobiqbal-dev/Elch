@@ -78,8 +78,8 @@ def optimize_python_memory():
     results = {}
     
     try:
-        # Set garbage collection thresholds more aggressively
-        gc.set_threshold(100, 5, 5)  # More frequent GC
+        # Set garbage collection thresholds optimized for 2GB
+        gc.set_threshold(700, 10, 10)  # Balanced GC for larger memory
         results["gc_threshold_set"] = True
         
         # Force initial garbage collection
@@ -142,8 +142,8 @@ def apply_memory_optimizations():
         logger.info("Memory optimizations disabled by configuration")
         return {"applied": False, "reason": "disabled_by_config"}
     
-    # Always apply ultra-aggressive optimizations for 512MB Render.com limit
-    logger.info("Applying ultra-aggressive memory optimizations for 512MB limit")
+    # Apply optimized settings for 2GB memory limit
+    logger.info("Applying memory optimizations for 2GB limit")
     
     # Apply Python memory optimizations first
     python_opts = optimize_python_memory()
@@ -152,40 +152,40 @@ def apply_memory_optimizations():
     # Apply PyTorch optimizations
     results["torch_optimized"] = optimize_torch_memory()
     
-    # Ultra-aggressive batch size reduction for 512MB limit
+    # Optimize batch size for 2GB memory limit
     if hasattr(settings, 'EMBEDDING_BATCH_SIZE'):
-        if settings.EMBEDDING_BATCH_SIZE > 1:  # Minimum possible batch size
-            logger.info(f"Reducing embedding batch size from {settings.EMBEDDING_BATCH_SIZE} to 1 for 512MB limit")
-            settings.EMBEDDING_BATCH_SIZE = 1
-            results["reduced_batch_size"] = True
+        if settings.EMBEDDING_BATCH_SIZE > 32:  # Reasonable batch size for 2GB
+            logger.info(f"Optimizing embedding batch size from {settings.EMBEDDING_BATCH_SIZE} to 32 for 2GB limit")
+            settings.EMBEDDING_BATCH_SIZE = 32
+            results["optimized_batch_size"] = True
     
-    # Ultra-aggressive memory cache reduction
+    # Optimize memory cache for 2GB limit
     if hasattr(settings, 'MEMORY_CACHE_SIZE'):
-        if settings.MEMORY_CACHE_SIZE > 50:  # Minimal cache for 512MB limit
-            logger.info(f"Reducing memory cache size from {settings.MEMORY_CACHE_SIZE} to 50 for 512MB limit")
-            settings.MEMORY_CACHE_SIZE = 50
-            results["reduced_cache_size"] = True
+        if settings.MEMORY_CACHE_SIZE > 1000:  # Generous cache for 2GB limit
+            logger.info(f"Optimizing memory cache size from {settings.MEMORY_CACHE_SIZE} to 1000 for 2GB limit")
+            settings.MEMORY_CACHE_SIZE = 1000
+            results["optimized_cache_size"] = True
     
-    # Ensure local embeddings are disabled
-    if getattr(settings, 'ENABLE_LOCAL_EMBEDDINGS', False):
-        logger.info("Disabling local embeddings for memory optimization")
-        settings.ENABLE_LOCAL_EMBEDDINGS = False
-        results["disabled_local_embeddings"] = True
+    # Enable local embeddings with 2GB memory available
+    if not getattr(settings, 'ENABLE_LOCAL_EMBEDDINGS', True):
+        logger.info("Enabling local embeddings with 2GB memory available")
+        settings.ENABLE_LOCAL_EMBEDDINGS = True
+        results["enabled_local_embeddings"] = True
     
-    # Set environment variables for ultra-aggressive memory efficiency
+    # Set environment variables for memory efficiency with 2GB available
     os.environ['PYTHONHASHSEED'] = '0'  # Consistent hashing
-    os.environ['MALLOC_TRIM_THRESHOLD_'] = '50000'  # Very aggressive malloc trimming
-    os.environ['MALLOC_MMAP_THRESHOLD_'] = '65536'  # Use mmap for large allocations
-    os.environ['PYTHONOPTIMIZE'] = '2'  # Remove docstrings and assertions
+    os.environ['MALLOC_TRIM_THRESHOLD_'] = '100000'  # Moderate malloc trimming for 2GB
+    os.environ['MALLOC_MMAP_THRESHOLD_'] = '131072'  # Use mmap for large allocations
+    os.environ['PYTHONOPTIMIZE'] = '1'  # Keep some optimizations but allow debugging
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Don't write .pyc files
     
-    # Force aggressive garbage collection every 30 seconds
+    # Moderate garbage collection every 60 seconds for 2GB limit
     import threading
     import time
     
     def periodic_gc():
         while True:
-            time.sleep(30)
+            time.sleep(60)  # Less frequent GC with more memory available
             collected = force_garbage_collection()
             if collected > 0:
                 logger.debug(f"Periodic GC collected {collected} objects")
@@ -194,20 +194,20 @@ def apply_memory_optimizations():
     gc_thread.start()
     results["periodic_gc_enabled"] = True
     
-    results["ultra_aggressive_mode"] = True
-    results["render_optimized"] = True
+    results["optimized_mode"] = True
+    results["memory_2gb_optimized"] = True
     
     # Final memory check
     final_memory = get_memory_usage()
     logger.info(f"Final memory usage: {final_memory.get('rss_mb', 'unknown'):.1f}MB RSS, {final_memory.get('percent', 'unknown'):.1f}%")
     
-    # Memory usage warning for Render.com 512MB limit
+    # Memory usage monitoring for 2GB limit
     current_mb = final_memory.get('rss_mb', 0)
-    if current_mb > 350:  # Warn at 350MB (68% of 512MB limit)
-        logger.warning(f"Memory usage is {current_mb:.1f}MB, approaching 512MB limit on Render.com")
+    if current_mb > 1400:  # Warn at 1400MB (70% of 2GB limit)
+        logger.warning(f"Memory usage is {current_mb:.1f}MB, approaching 2GB limit")
         results["memory_warning"] = True
-    elif current_mb > 450:  # Critical warning at 450MB (88% of limit)
-        logger.critical(f"Memory usage is {current_mb:.1f}MB, critically close to 512MB limit!")
+    elif current_mb > 1700:  # Critical warning at 1700MB (85% of limit)
+        logger.critical(f"Memory usage is {current_mb:.1f}MB, critically close to 2GB limit!")
         results["memory_critical"] = True
         # Force emergency garbage collection
         emergency_collected = force_garbage_collection()

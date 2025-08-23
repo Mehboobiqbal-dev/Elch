@@ -118,3 +118,4 @@ jobs:
           echo "⚠️ Application health check returned: $response"
           echo "Application URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
         fi
+ 
