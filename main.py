@@ -825,7 +825,7 @@ async def feedback(request: Request):
         db.close()
 
 @app.get('/healthz')
-def healthz():
+async def healthz():
     try:
         # Get circuit breaker statuses
         circuit_breaker_status = {
@@ -1479,7 +1479,7 @@ async def agent_run(request: Request):
         db.close()
 
 @app.get('/')
-def root():
+async def root():
     return {"message": "Multi-Cloud AI Management API is running!", "status": "healthy"}
 
 @app.get('/chat/history')
