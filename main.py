@@ -355,7 +355,7 @@ async def me(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -458,7 +458,7 @@ async def scrape_website(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -969,7 +969,7 @@ async def call_tool(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -1032,7 +1032,7 @@ async def agent_run(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -1049,11 +1049,6 @@ async def agent_run(request: Request):
     try:
         core.log_action('agent_run', {'user_input': agent_req.user_input})
         
-        # This part seems to have a logical error. 'user' is not defined here.
-        # Assuming we should get the user_id from the authenticated token.
-        # user_id = user.id 
-        # Corrected: user_id is already available from token payload
-
         websocket = active_connections.get(user_id)
         
         # Add current goal to memory only if provided (avoid adding None during resume)
