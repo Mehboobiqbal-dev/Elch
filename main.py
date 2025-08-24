@@ -153,7 +153,7 @@ active_connections: Dict[int, WebSocket] = {}
 # Add CORS middleware first
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS.split(",") if settings.ALLOWED_ORIGINS != "*" else ["*"],
+    allow_origins=settings.ALLOWED_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -351,22 +351,29 @@ async def me(request: Request):
     # Manual authentication
     authorization = request.headers.get("Authorization")
     if not authorization or not authorization.startswith("Bearer "):
+        print(f"DEBUG: Missing or invalid authorization header: {authorization}")
         raise HTTPException(status_code=401, detail="Could not validate credentials")
     
     token = authorization.split(" ")[1]
+    print(f"DEBUG: Received token: {token[:50]}...")
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
+        print(f"DEBUG: Decoded payload: {payload}")
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
+        print(f"DEBUG: Extracted email: {email}, user_id: {user_id}")
         if email is None or user_id is None:
+            print("DEBUG: Missing email or user_id in payload")
             raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
+    except JWTError as e:
+        print(f"DEBUG: JWT decode error: {e}")
         raise HTTPException(status_code=401, detail="Could not validate credentials")
     
     # Manual database session management
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
+        print(f"DEBUG: Found user: {user.email if user else 'None'}")
         if user is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
         return user
@@ -382,7 +389,7 @@ async def get_credentials(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -410,7 +417,7 @@ async def save_credentials(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -458,7 +465,7 @@ async def scrape_website(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -496,7 +503,7 @@ async def prompt(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -659,7 +666,7 @@ async def execute_plan(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -773,7 +780,7 @@ async def feedback(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -969,7 +976,7 @@ async def call_tool(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:
@@ -1032,7 +1039,7 @@ async def agent_run(request: Request):
     
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if email is None or user_id is None:

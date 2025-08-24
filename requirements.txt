@@ -8,15 +8,15 @@ click
 # Authentication and security
 authlib
 passlib[bcrypt]
-python-jose[cryptography]
-cryptography
+python-jose[cryptography]>=3.3.0
+cryptography==39.0.1
 bcrypt==3.2.2
 slowapi
 GitPython
 
 # Database
 sqlalchemy
-psycopg2-binary
+psycopg[binary]
 
 # HTTP and networking
 httpx
@@ -41,7 +41,7 @@ openai
 # Local embeddings and ML (for resilience)
 sentence-transformers>=2.2.0
 torch>=1.9.0
-transformers>=4.20.0
+transformers>=4.2.0
 numpy>=1.21.0
 scipy>=1.7.0
 scikit-learn>=1.0.0
