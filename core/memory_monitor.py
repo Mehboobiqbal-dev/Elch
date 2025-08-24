@@ -140,16 +140,8 @@ class MemoryMonitor:
         # Emergency cleanup
         self._emergency_action()
         
-        # Clear import caches (but preserve critical modules)
-        # Note: sys.modules.clear() is too aggressive and corrupts the Python environment
-        # Instead, we'll clear only non-essential modules
-        essential_modules = {'sys', 'builtins', '__main__', 'os', 'logging'}
-        modules_to_clear = [name for name in sys.modules.keys() if name not in essential_modules]
-        for module_name in modules_to_clear:
-            try:
-                del sys.modules[module_name]
-            except KeyError:
-                pass
+        # Clear import caches
+        sys.modules.clear()
         
         # Force Python to release memory back to OS
         try:

@@ -2,7 +2,7 @@ import json
 import sqlite3
 import os
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from pathlib import Path
 import hashlib
 import uuid
@@ -315,7 +315,7 @@ class TaskDataManager:
         conn.close()
         return results
     
-    def get_task_statistics(self, user_id: Optional[int] = None) -> Dict:
+    def get_task_statistics(self, user_id: int | None = None) -> Dict:
         """Get statistics about saved tasks (user_id accepted for compatibility, not stored in schema)."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

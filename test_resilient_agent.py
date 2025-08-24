@@ -18,7 +18,6 @@ from core.structured_logging import structured_logger, LogContext
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
- 
 
 def test_form_automation_resilience():
     """Test that the agent can handle form automation failures gracefully."""

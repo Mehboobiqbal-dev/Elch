@@ -22,13 +22,13 @@ from sqlalchemy.orm import Session
 from authlib.integrations.starlette_client import OAuth
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
 from passlib.context import CryptContext
 
 import time
-from core.db import SessionLocal, Base, get_db
+from core.db import SessionLocal, Base
 from core.db import init_db
 from models import User, CloudCredential, PlanHistory, ChatHistory, AgentSession
 from security import encrypt_text as encrypt, decrypt_text as decrypt
@@ -120,7 +120,6 @@ from auth import get_current_user
 # Configure logging for production
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-@contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         logging.info("Database initialization handled by init_db_script.py.")
@@ -145,15 +144,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Create alias for uvicorn compatibility
-application = app
-
 active_connections: Dict[int, WebSocket] = {}
 
 # Add CORS middleware first
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS.split(","),
+    allow_origins=settings.ALLOWED_ORIGINS.split(",") if settings.ALLOWED_ORIGINS != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -180,6 +176,12 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -187,7 +189,7 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -198,67 +200,37 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 @app.post("/signup", response_model=schemas.User)
-async def signup(request: Request):
-    # Parse request body manually
-    body = await request.json()
-    user = schemas.UserCreate(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        db_user = db.query(User).filter(User.email == user.email).first()
-        if db_user:
-            raise HTTPException(status_code=400, detail="Email already registered")
-        hashed_password = get_password_hash(user.password)
-        db_user = User(email=user.email, hashed_password=hashed_password, name=user.name)
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-        return db_user
-    finally:
-        db.close()
+def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    hashed_password = get_password_hash(user.password)
+    db_user = User(email=user.email, hashed_password=hashed_password, name=user.name)
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
 
 @app.post("/token")
-async def login_for_access_token(request: Request):
-    # Parse standard OAuth2 password form without using dependency resolution
-    form = await request.form()
-    username = form.get("username")
-    password = form.get("password")
-
-    if not username or not password:
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Username and password are required",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email, "user_id": user.id}, expires_delta=access_token_expires
+    )
+    
+    response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
+    return response
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == username).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
 
-        # Run password verification in thread to avoid blocking the event loop
-        password_valid = await asyncio.to_thread(verify_password, password, user.hashed_password)
-        if not password_valid:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
 
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": user.email, "user_id": user.id}, expires_delta=access_token_expires
-        )
 
-        response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
-        return response
-    finally:
-        db.close()
 
 @app.get('/login/{provider}')
 async def login(request: Request, provider: str):
@@ -347,136 +319,37 @@ from routes.tasks import router as tasks_router
 app.include_router(tasks_router, dependencies=[Depends(get_current_user)])
 
 @app.get('/me', response_model=schemas.User)
-async def me(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        print(f"DEBUG: Missing or invalid authorization header: {authorization}")
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    token = authorization.split(" ")[1]
-    print(f"DEBUG: Received token: {token[:50]}...")
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        print(f"DEBUG: Decoded payload: {payload}")
-        email: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-        print(f"DEBUG: Extracted email: {email}, user_id: {user_id}")
-        if email is None or user_id is None:
-            print("DEBUG: Missing email or user_id in payload")
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError as e:
-        print(f"DEBUG: JWT decode error: {e}")
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        print(f"DEBUG: Found user: {user.email if user else 'None'}")
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        return user
-    finally:
-        db.close()
+async def me(user: schemas.User = Depends(get_current_user)):
+    return user
 
 @app.get('/credentials', response_model=List[schemas.CloudCredential])
-async def get_credentials(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        
-        creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
-        return creds
-    finally:
-        db.close()
+async def get_credentials(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
+    return creds
 
 @app.post('/credentials', response_model=schemas.CloudCredential)
-async def save_credentials(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+async def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cred = db.query(CloudCredential).filter_by(user_id=user.id, provider=cred_data.provider).first()
+    if not cred:
+        cred = CloudCredential(user_id=user.id, provider=cred_data.provider)
     
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    cred_data = schemas.CloudCredentialCreate(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        
-        cred = db.query(CloudCredential).filter_by(user_id=user.id, provider=cred_data.provider).first()
-        if not cred:
-            cred = CloudCredential(user_id=user.id, provider=cred_data.provider)
-        
-        update_data = cred_data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            if key not in ["provider"] and value is not None:
-                setattr(cred, key, encrypt(value))
+    update_data = cred_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if key not in ["provider"] and value is not None:
+            setattr(cred, key, encrypt(value))
 
-        db.add(cred)
-        db.commit()
-        db.refresh(cred)
-        log_audit(db, user.id, f'update_{cred_data.provider}_credentials', 'Credentials updated')
-        return cred
-    finally:
-        db.close()
+    db.add(cred)
+    db.commit()
+    db.refresh(cred)
+    log_audit(db, user.id, f'update_{cred_data.provider}_credentials', 'Credentials updated')
+    return cred
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.post('/scrape')
-async def scrape_website(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        email: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-        if email is None or user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    scrape_req = ScrapeRequest(**body)
-    
+async def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends(get_current_user)):
     from scraping_analysis import scrape_website_comprehensive
     try:
         result = scrape_website_comprehensive(scrape_req.url)
@@ -495,49 +368,24 @@ async def scrape_website(request: Request):
     )
 )
 @limiter.limit("10/minute")
-async def prompt(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+async def prompt(request: Request, prompt_req: schemas.PromptRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    prompt_text = prompt_req.prompt
+    prompt_context = LogContext(
+        metadata={
+            'user_id': user.id,
+            'prompt_length': len(prompt_text),
+            'operation_type': 'prompt_generation'
+        }
+    )
     
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    prompt_req = schemas.PromptRequest(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        
-        prompt_text = prompt_req.prompt
-        prompt_context = LogContext(
-            metadata={
-                'user_id': user.id,
-                'prompt_length': len(prompt_text),
-                'operation_type': 'prompt_generation'
-            }
+    with operation_context('prompt_generation', prompt_context):
+        structured_logger.log_tool_execution(
+            f"Received prompt from user {user.id}: '{prompt_text}'",
+            prompt_context,
+            {"prompt": prompt_text}
         )
-        
-        with operation_context('prompt_generation', prompt_context):
-            structured_logger.log_tool_execution(
-                f"Received prompt from user {user.id}: '{prompt_text}'",
-                prompt_context,
-                {"prompt": prompt_text}
-            )
-        
-        # Memory search and context building
+    
+    try:
         memory_instance = memory.get_memory_instance()
         retrieved_docs_tuples = memory_instance.search(prompt_text, k=3)
         context_parts = []
@@ -616,26 +464,23 @@ YOUR PLAN:
 """
     logging.info("Generating plan with LLM...")
     
-    # Generate plan with LLM
-    response_text = generate_text(gemini_prompt)
-    logging.info(f"LLM raw response: {response_text}")
-    
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-    if json_match:
-        plan_text = json_match.group(1)
-    else:
-        plan_text = response_text
-
-    from core.utils import parse_json_tolerant
-    response_data = parse_json_tolerant(plan_text)
-    
     try:
+        response_text = generate_text(gemini_prompt)
+        logging.info(f"LLM raw response: {response_text}")
+        
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
+        if json_match:
+            plan_text = json_match.group(1)
+        else:
+            plan_text = response_text
+
+        from core.utils import parse_json_tolerant
+        response_data = parse_json_tolerant(plan_text)
         plan = response_data.get("plan")
+
         if not isinstance(plan, list):
             raise json.JSONDecodeError("The 'plan' key must contain a list of steps.", plan_text, 0)
 
-        return {"plan": plan, "prompt": prompt_text}
-        
     except (json.JSONDecodeError, TypeError, AttributeError, ValueError) as e:
         logging.error(f"Failed to generate or parse a valid plan from LLM response: {e}", exc_info=True)
         return {
@@ -644,8 +489,8 @@ YOUR PLAN:
     except Exception as e:
         logging.error(f"An unexpected error occurred during plan generation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during plan generation.")
-    finally:
-        db.close()
+
+    return {"plan": plan, "prompt": prompt_text}
 
 @app.post('/execute_plan')
 @circuit_breaker(
@@ -658,42 +503,17 @@ YOUR PLAN:
     )
 )
 @limiter.limit("10/minute")
-async def execute_plan(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+async def execute_plan(request: Request, exec_req: schemas.PlanExecutionRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    core.log_action('execute_plan', {'prompt': exec_req.prompt})
+    execution_context = LogContext(
+        metadata={
+            'user_id': user.id,
+            'plan_steps': len(exec_req.plan),
+            'operation_type': 'plan_execution'
+        }
+    )
     
-    token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    exec_req = schemas.PlanExecutionRequest(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        
-        core.log_action('execute_plan', {'prompt': exec_req.prompt})
-        
-        execution_context = LogContext(
-            metadata={
-                'user_id': user.id,
-                'plan_steps': len(exec_req.plan),
-                'operation_type': 'plan_execution'
-            }
-        )
-        
         with operation_context('execute_plan', execution_context):
             plan = exec_req.plan
             prompt_text = exec_req.prompt
@@ -703,46 +523,46 @@ async def execute_plan(request: Request):
                 execution_context,
                 {"plan_steps": len(plan), "prompt": prompt_text}
             )
+        
+        creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
+        user_creds = {}
+        for c in creds:
+            if c.provider == 'aws':
+                user_creds['aws'] = {'access_key': decrypt(c.access_key), 'secret_key': decrypt(c.secret_key)}
+            elif c.provider == 'azure':
+                user_creds['azure'] = {'azure_subscription_id': decrypt(c.azure_subscription_id), 'azure_client_id': decrypt(c.azure_client_id), 'azure_client_secret': decrypt(c.azure_client_secret), 'azure_tenant_id': decrypt(c.azure_tenant_id)}
+            elif c.provider == 'gcp':
+                 user_creds['gcp'] = {'gcp_project_id': decrypt(c.gcp_project_id), 'gcp_credentials_json': decrypt(c.gcp_credentials_json)}
+
+        execution_steps = []
+        for i, planned_step in enumerate(plan):
+            action = planned_step.get('action')
+            params = planned_step.get('params', {})
+            step_num = planned_step.get('step', i + 1)
+
+            if not action:
+                execution_steps.append({"step": step_num, "action": "unknown", "status": "error", "details": "Missing 'action' in plan step."})
+                continue
             
-            creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
-            user_creds = {}
-            for c in creds:
-                if c.provider == 'aws':
-                    user_creds['aws'] = {'access_key': decrypt(c.access_key), 'secret_key': decrypt(c.secret_key)}
-                elif c.provider == 'azure':
-                    user_creds['azure'] = {'azure_subscription_id': decrypt(c.azure_subscription_id), 'azure_client_id': decrypt(c.azure_client_id), 'azure_client_secret': decrypt(c.azure_client_secret), 'azure_tenant_id': decrypt(c.azure_tenant_id)}
-                elif c.provider == 'gcp':
-                     user_creds['gcp'] = {'gcp_project_id': decrypt(c.gcp_project_id), 'gcp_credentials_json': decrypt(c.gcp_credentials_json)}
+            if action == "ask_user":
+                return {"status": "requires_input", "message": "User input required", "details": params.get("question")}
 
-            execution_steps = []
-            for i, planned_step in enumerate(plan):
-                action = planned_step.get('action')
-                params = planned_step.get('params', {})
-                step_num = planned_step.get('step', i + 1)
+            tool = tool_registry.get_tool(action)
+            if not tool:
+                execution_steps.append({"step": step_num, "action": action, "status": "error", "details": f"Tool '{action}' not found in registry."})
+                continue
 
-                if not action:
-                    execution_steps.append({"step": step_num, "action": "unknown", "status": "error", "details": "Missing 'action' in plan step."})
-                    continue
-                
-                if action == "ask_user":
-                    return {"status": "requires_input", "message": "User input required", "details": params.get("question")}
+            try:
+                logging.info(f"Executing step {step_num}: action='{action}', params={params}")
+                if action == "cloud_operation":
+                    params["user_creds"] = user_creds
+                result = tool.func(**params)
+                execution_steps.append({"step": step_num, "action": action, "status": "done", "details": result})
+            except Exception as e:
+                logging.error(f"Error executing step {step_num} ('{action}'): {e}", exc_info=True)
+                execution_steps.append({"step": step_num, "action": action, "status": "error", "details": f"An exception occurred: {str(e)}"})
 
-                tool = tool_registry.get_tool(action)
-                if not tool:
-                    execution_steps.append({"step": step_num, "action": action, "status": "error", "details": f"Tool '{action}' not found in registry."})
-                    continue
-
-                try:
-                    logging.info(f"Executing step {step_num}: action='{action}', params={params}")
-                    if action == "cloud_operation":
-                        params["user_creds"] = user_creds
-                    result = tool.func(**params)
-                    execution_steps.append({"step": step_num, "action": action, "status": "done", "details": result})
-                except Exception as e:
-                    logging.error(f"Error executing step {step_num} ('{action}'): {e}", exc_info=True)
-                    execution_steps.append({"step": step_num, "action": action, "status": "error", "details": f"An exception occurred: {str(e)}"})
-
-            overall_status = "error" if any(s['status'] == 'error' for s in execution_steps) else "success"
+        overall_status = "error" if any(s['status'] == 'error' for s in execution_steps) else "success"
         
         new_plan_history = PlanHistory(
             user_id=user.id,
@@ -757,61 +577,33 @@ async def execute_plan(request: Request):
 
         log_audit(db, user.id, 'execute_plan', f'Plan History ID: {new_plan_history.id}')
         core.post_task_review(prompt_text, overall_status == 'success', {'steps': len(execution_steps)})
-        
-        return {
-            "status": overall_status,
-            "message": "Plan execution finished. Your feedback is valuable for my improvement.",
-            "steps": execution_steps,
-            "plan_id": new_plan_history.id,
-            "feedback_prompt": f"Did this work as expected? To help me learn, please use the /feedback endpoint with plan_id: {new_plan_history.id} and your feedback ('success' or 'failure')."
-        }
     except Exception as e:
-        core.log_error(str(e), {'prompt': exec_req.prompt})
+        core.log_error(str(e), {'prompt': prompt_text})
         raise
-    finally:
-        db.close()
+    return {
+        "status": overall_status,
+        "message": "Plan execution finished. Your feedback is valuable for my improvement.",
+        "steps": execution_steps,
+        "plan_id": new_plan_history.id,
+        "feedback_prompt": f"Did this work as expected? To help me learn, please use the /feedback endpoint with plan_id: {new_plan_history.id} and your feedback ('success' or 'failure')."
+    }
 
 @app.post('/feedback')
-async def feedback(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+async def feedback(feedback_req: schemas.FeedbackRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    plan_history = db.query(PlanHistory).filter(PlanHistory.id == feedback_req.plan_id, PlanHistory.user_id == user.id).first()
+
+    if not plan_history:
+        raise HTTPException(status_code=404, detail="Plan history not found for the current user.")
     
-    token = authorization.split(" ")[1]
+    if feedback_req.feedback not in ["success", "failure"]:
+        raise HTTPException(status_code=400, detail="Feedback must be either 'success' or 'failure'.")
+
+    plan_history.feedback = feedback_req.feedback
+    plan_history.correction = feedback_req.correction
+    plan_history.status = feedback_req.feedback
+    db.commit()
+
     try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    feedback_req = schemas.FeedbackRequest(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-        
-        plan_history = db.query(PlanHistory).filter(PlanHistory.id == feedback_req.plan_id, PlanHistory.user_id == user.id).first()
-
-        if not plan_history:
-            raise HTTPException(status_code=404, detail="Plan history not found for the current user.")
-        
-        if feedback_req.feedback not in ["success", "failure"]:
-            raise HTTPException(status_code=400, detail="Feedback must be either 'success' or 'failure'.")
-
-        plan_history.feedback = feedback_req.feedback
-        plan_history.correction = feedback_req.correction
-        plan_history.status = feedback_req.feedback
-        db.commit()
-
-        # Update agent's memory with the feedback
         memory_instance = memory.get_memory_instance()
         interaction_data = {
             "prompt": plan_history.prompt,
@@ -822,17 +614,14 @@ async def feedback(request: Request):
         }
         memory_instance.add_document(interaction_data)
         logging.info(f"Added feedback and full interaction for plan {feedback_req.plan_id} to agent's memory.")
-        
-        return {"status": "success", "message": "Thank you for the feedback! I've recorded it to improve my future performance."}
-    
     except Exception as e:
-        logging.error(f"Error processing feedback for plan {feedback_req.plan_id}: {e}", exc_info=True)
-        return {"status": "error", "message": "Failed to record feedback."}
-    finally:
-        db.close()
+        logging.error(f"Error adding feedback to memory for plan {feedback_req.plan_id}: {e}", exc_info=True)
+        return {"status": "success", "message": "Feedback recorded, but failed to update my long-term memory."}
+
+    return {"status": "success", "message": "Thank you for the feedback! I've recorded it to improve my future performance."}
 
 @app.get('/healthz')
-async def healthz():
+def healthz():
     try:
         # Get circuit breaker statuses
         circuit_breaker_status = {
@@ -968,40 +757,18 @@ async def api_automate_login(request: schemas.LoginAutomationRequest, user: sche
         raise HTTPException(status_code=500, detail=f"Error automating login: {str(e)}")
 
 @app.post('/call_tool')
-async def call_tool(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        email: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-        if email is None or user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    # Parse request body manually
-    body = await request.json()
-    tool_req = schemas.ToolCallRequest(**body)
-    
+async def call_tool(tool_req: schemas.ToolCallRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     tool_name = tool_req.tool_name
     params = tool_req.params
     tool = tool_registry.get_tool(tool_name)
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found.")
-    
-    # Manual database session management
-    db = SessionLocal()
     try:
         if tool_name in ['open_browser', 'get_page_content', 'fill_form', 'fill_multiple_fields', 'click_button', 'close_browser', 'search_web',
                         'select_dropdown_option', 'upload_file', 'wait_for_element', 'check_checkbox']:
             result = tool.func(**params)
         else:
-            creds = db.query(CloudCredential).filter_by(user_id=user_id).all()
+            creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
             user_creds = {}
             for c in creds:
                 if c.provider == 'aws':
@@ -1012,8 +779,6 @@ async def call_tool(request: Request):
         return {'result': result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing tool: {str(e)}")
-    finally:
-        db.close()
 
 def generate_text(prompt: str) -> str:
     """
@@ -1031,54 +796,33 @@ def generate_text(prompt: str) -> str:
 
 @app.post('/agent/run', response_model=schemas.AgentRunResponse, tags=["Agent"])
 @limiter.limit("5/minute")
-async def agent_run(request: Request):
-    # Manual authentication
-    authorization = request.headers.get("Authorization")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    core.log_action('agent_run', {'user_input': agent_req.user_input})
+    user_id = user.id
+    websocket = active_connections.get(user_id)
     
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=["HS256"])
-        email: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-        if email is None or user_id is None:
-            raise HTTPException(status_code=401, detail="Could not validate credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    # Add current goal to memory only if provided (avoid adding None during resume)
+    if agent_req.user_input:
+        memory.memory_instance.add_document({"type": "user_goal", "content": agent_req.user_input, "timestamp": datetime.now().isoformat()})
+        save_agent_memory()
     
-    # Parse request body manually
-    body = await request.json()
-    agent_req = schemas.AgentStateRequest(**body)
-    
-    # Manual database session management
-    db = SessionLocal()
-    try:
-        core.log_action('agent_run', {'user_input': agent_req.user_input})
-        
-        websocket = active_connections.get(user_id)
-        
-        # Add current goal to memory only if provided (avoid adding None during resume)
-        if agent_req.user_input:
-            memory.memory_instance.add_document({"type": "user_goal", "content": agent_req.user_input, "timestamp": datetime.now().isoformat()})
-            save_agent_memory()
-        
-        # Retrieve relevant context from memory if input provided
-        if agent_req.user_input:
-            relevant_context = memory.memory_instance.search(agent_req.user_input, k=5) # Get top 5 relevant documents
-            context_str = "\n".join([json.dumps(doc) for _, doc in relevant_context])
-            if context_str:
-                print(f"Retrieved context from memory: {context_str}")
+    # Retrieve relevant context from memory if input provided
+    if agent_req.user_input:
+        relevant_context = memory.memory_instance.search(agent_req.user_input, k=5) # Get top 5 relevant documents
+        context_str = "\n".join([json.dumps(doc) for _, doc in relevant_context])
+        if context_str:
+            print(f"Retrieved context from memory: {context_str}")
 
-        async def send_log(message: str):
-            if websocket:
-                try:
-                    await websocket.send_json({"topic": "agent_updates", "payload": {"log": message}})
-                except RuntimeError as e:
-                    logging.warning(f"Could not send log to WebSocket for user {user_id}: {e}")
-            else:
-                logging.warning(f"No active WebSocket connection for user {user_id} to send log: {message}")
+    async def send_log(message: str):
+        if websocket:
+            try:
+                await websocket.send_json({"topic": "agent_updates", "payload": {"log": message}})
+            except RuntimeError as e:
+                logging.warning(f"Could not send log to WebSocket for user {user_id}: {e}")
+        else:
+            logging.warning(f"No active WebSocket connection for user {user_id} to send log: {message}")
 
+    try:
         # Ensure we have a run_id to persist and resume the session
         run_id = agent_req.run_id
         if not run_id:
@@ -1346,7 +1090,7 @@ async def agent_run(request: Request):
                         "Please provide the required credentials or information to continue."))
                 
                 await send_log(f"Agent requires user input: {assistance_message}")
-                await websocket.send_json({
+                await send_log(json.dumps({
                     "topic": "agent_updates", 
                     "payload": {
                         "status": "requires_input", 
@@ -1356,7 +1100,7 @@ async def agent_run(request: Request):
                             "run_id": session_obj.run_id
                         }
                     }
-                })
+                }))
                 
                 session_obj.status = 'requires_input'
                 session_obj.awaiting_assistance = True
@@ -1401,7 +1145,7 @@ async def agent_run(request: Request):
                     history=history
                 )
                 
-                await websocket.send_json({
+                await send_log(json.dumps({
                     "topic": "agent_updates", 
                     "payload": {
                         "status": "complete", 
@@ -1411,7 +1155,7 @@ async def agent_run(request: Request):
                             "notification": completion_notification
                         }
                     }
-                })
+                }))
                 
                 session_obj.status = 'completed'
                 session_obj.history = json.dumps(history)
@@ -1443,7 +1187,7 @@ async def agent_run(request: Request):
         session_obj.history = json.dumps(history)
         db.commit()
         
-        await websocket.send_json({
+        await send_log(json.dumps({
             "topic": "agent_updates", 
             "payload": {
                 "status": "paused", 
@@ -1454,7 +1198,7 @@ async def agent_run(request: Request):
                     "run_id": session_obj.run_id
                 }
             }
-        })
+        }))
         
         return schemas.AgentRunResponse(
             status="paused", 
@@ -1474,14 +1218,12 @@ async def agent_run(request: Request):
                 db.commit()
         except Exception:
             pass
-        if 'websocket' in locals() and websocket:
-            await websocket.send_json({"topic": "agent_updates", "payload": {"status": "error", "data": {"message": error_message}}})
-        raise HTTPException(status_code=500, detail=error_message)
-    finally:
-        db.close()
+        await send_log(error_message)
+        await send_log(json.dumps({"topic": "agent_updates", "payload": {"status": "error", "data": {"message": error_message}}}))
+        raise
 
 @app.get('/')
-async def root():
+def root():
     return {"message": "Multi-Cloud AI Management API is running!", "status": "healthy"}
 
 @app.get('/chat/history')

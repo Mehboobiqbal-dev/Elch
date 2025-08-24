@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
     GOOGLE_CLIENT_ID: str = os.environ.get("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    ALLOWED_ORIGINS: str = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:52828")
     FORCE_HTTPS: bool = os.environ.get("FORCE_HTTPS", "false").lower() == "true"
     # Gemini settings are managed in core/config.py
     FERNET_KEY: str = os.environ.get("FERNET_KEY", "")

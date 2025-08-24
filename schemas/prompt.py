@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any, Dict, Union
+from typing import List, Optional, Any, Dict
 
 from schemas.base import BaseSchema, BaseResponseSchema
 
@@ -23,7 +23,7 @@ class Step(BaseSchema):
     step: int
     action: str
     status: str
-    details: Union[dict, str]
+    details: dict | str
     
     class Config:
         json_schema_extra = {
