@@ -28,7 +28,7 @@ from starlette.responses import RedirectResponse
 from passlib.context import CryptContext
 
 import time
-from core.db import SessionLocal, Base
+from core.db import SessionLocal, Base, get_db
 from core.db import init_db
 from models import User, CloudCredential, PlanHistory, ChatHistory, AgentSession
 from security import encrypt_text as encrypt, decrypt_text as decrypt
@@ -180,12 +180,6 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-async def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -216,30 +210,46 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return db_user
 
 @app.post("/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user:
+async def login_for_access_token(request: Request):
+    # Parse standard OAuth2 password form without using dependency resolution
+    form = await request.form()
+    username = form.get("username")
+    password = form.get("password")
+
+    if not username or not password:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Username and password are required",
         )
-    
-    # Run password verification in thread pool to avoid blocking async context
-    password_valid = await asyncio.to_thread(verify_password, form_data.password, user.hashed_password)
-    if not password_valid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == username).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Run password verification in thread to avoid blocking the event loop
+        password_valid = await asyncio.to_thread(verify_password, password, user.hashed_password)
+        if not password_valid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email, "user_id": user.id}, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "user_id": user.id}, expires_delta=access_token_expires
-    )
-    
-    response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
-    return response
+
+        response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
+        return response
+    finally:
+        db.close()
 
 
 

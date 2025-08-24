@@ -1,6 +1,8 @@
 # Core FastAPI and web framework dependencies
-fastapi
-uvicorn[standard]
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+anyio==3.7.1
+sniffio==1.3.0
 gunicorn
 click
 # Authentication and security
@@ -84,8 +86,8 @@ mypy>=0.990
 
 # Additional production dependencies
 webdriver-manager
-fastapi-limiter
-starlette
+fastapi-limiter==0.1.5
+starlette==0.27.0
 aiofiles
 
 # Optional / custom modules (commented out to reduce weight or missing pip packages)
