@@ -75,15 +75,9 @@ def load_agent_memory():
         with open(MEMORY_FILE, 'r') as f:
             try:
                 data = json.load(f)
-                knowledge = data.get('knowledge', [])
-                print(f"Loading {len(knowledge)} documents from agent memory.")
                 # Assuming 'knowledge' is the key where documents are stored
-                for i, doc in enumerate(knowledge):
-                    try:
-                        # FIX: Add a try-except block to handle malformed individual documents
-                        memory.memory_instance.add_document(doc)
-                    except Exception as e:
-                        print(f"Warning: Skipping malformed document #{i} in agent memory: {e}")
+                for doc in data.get('knowledge', []):
+                    memory.memory_instance.add_document(doc)
                 print("Agent memory loaded successfully.")
             except json.JSONDecodeError as e:
                 print(f"Error decoding agent memory JSON: {e}")
@@ -91,7 +85,6 @@ def load_agent_memory():
                 print(f"Error loading agent memory: {e}")
     else:
         print("Agent memory file not found. Starting with empty memory.")
-
 
 def save_agent_memory():
     # Only save agent memory if NO_MEMORY is not set to true
@@ -218,7 +211,6 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
-# FIX: Changed from `async def` to `def` as the function body is synchronous.
 @app.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
@@ -272,7 +264,7 @@ async def auth(request: Request, provider: str, db: Session = Depends(get_db)):
     return response
 
 
-def get_current_user_from_ws(
+async def get_current_user_from_ws(
     websocket: WebSocket,
     db: Session = Depends(get_db)
 ) -> schemas.User:
@@ -322,18 +314,15 @@ app.include_router(universal_assistant.router, prefix="/assistant", tags=["assis
 from routes.tasks import router as tasks_router
 app.include_router(tasks_router, dependencies=[Depends(get_current_user)])
 
-# FIX: Changed from `async def` to `def`
 @app.get('/me', response_model=schemas.User)
 def me(user: schemas.User = Depends(get_current_user)):
     return user
 
-# FIX: Changed from `async def` to `def`
 @app.get('/credentials', response_model=List[schemas.CloudCredential])
 def get_credentials(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
     return creds
 
-# FIX: Changed from `async def` to `def`
 @app.post('/credentials', response_model=schemas.CloudCredential)
 def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     cred = db.query(CloudCredential).filter_by(user_id=user.id, provider=cred_data.provider).first()
@@ -355,7 +344,6 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# FIX: Changed from `async def` to `def`
 @app.post('/scrape')
 def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends(get_current_user)):
     from scraping_analysis import scrape_website_comprehensive
@@ -365,7 +353,6 @@ def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# FIX: Changed from `async def` to `def`
 @app.post('/prompt')
 @circuit_breaker(
     'prompt_generation',
@@ -501,7 +488,6 @@ YOUR PLAN:
 
     return {"plan": plan, "prompt": prompt_text}
 
-# FIX: Changed from `async def` to `def`
 @app.post('/execute_plan')
 @circuit_breaker(
     'plan_execution',
@@ -598,7 +584,6 @@ def execute_plan(request: Request, exec_req: schemas.PlanExecutionRequest, user:
         "feedback_prompt": f"Did this work as expected? To help me learn, please use the /feedback endpoint with plan_id: {new_plan_history.id} and your feedback ('success' or 'failure')."
     }
 
-# FIX: Changed from `async def` to `def`
 @app.post('/feedback')
 def feedback(feedback_req: schemas.FeedbackRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan_history = db.query(PlanHistory).filter(PlanHistory.id == feedback_req.plan_id, PlanHistory.user_id == user.id).first()
@@ -657,7 +642,6 @@ def healthz():
             "error": str(e)
         }
 
-# FIX: Changed from `async def` to `def`
 @app.get('/memory/stats')
 def get_memory_statistics():
     """Get detailed memory usage statistics and monitoring data."""
@@ -681,7 +665,6 @@ def get_memory_statistics():
             "error": str(e)
         }
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_upwork')
 def api_apply_job_upwork(request: schemas.UpworkJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -695,7 +678,6 @@ def api_apply_job_upwork(request: schemas.UpworkJobRequest, user: schemas.User =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for Upwork job: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_fiverr')
 def api_apply_job_fiverr(request: schemas.FiverrJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -710,7 +692,6 @@ def api_apply_job_fiverr(request: schemas.FiverrJobRequest, user: schemas.User =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for Fiverr job: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_linkedin')
 def api_apply_job_linkedin(request: schemas.LinkedInJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -726,7 +707,6 @@ def api_apply_job_linkedin(request: schemas.LinkedInJobRequest, user: schemas.Us
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for LinkedIn job: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/batch_apply_jobs')
 def api_batch_apply_jobs(request: schemas.BatchJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -741,7 +721,6 @@ def api_batch_apply_jobs(request: schemas.BatchJobRequest, user: schemas.User = 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in batch job application: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/automate_registration')
 def api_automate_registration(request: schemas.RegistrationRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -756,7 +735,6 @@ def api_automate_registration(request: schemas.RegistrationRequest, user: schema
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error automating registration: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/form/automate_login')
 def api_automate_login(request: schemas.LoginAutomationRequest, user: schemas.User = Depends(get_current_user)):
     try:
@@ -774,7 +752,6 @@ def api_automate_login(request: schemas.LoginAutomationRequest, user: schemas.Us
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error automating login: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.post('/call_tool')
 def call_tool(tool_req: schemas.ToolCallRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     tool_name = tool_req.tool_name
@@ -946,7 +923,7 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
             thought = "No thought recorded due to an error."
             try:
                 await send_log(f"Generating next action with LLM...")
-                response_text = generate_text(prompt)
+                response_text = await asyncio.to_thread(generate_text, prompt)
                 await send_log(f"LLM Response: {response_text[:200]}...") # Log first 200 chars
                 # Extract JSON from the response with tolerant parsing
                 from core.utils import parse_json_tolerant
@@ -1012,26 +989,22 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                             await send_log(f"Removed invalid parameters for {action_name}: {removed_params}")
                             action_params = valid_params
                     
-                    # Add timeout for browser operations to prevent hanging
-                    import asyncio
-                    import concurrent.futures
-                    
+                    # Execute tool in a thread to avoid blocking the event loop
                     if action_name in browser_required_tools:
-                        # Execute browser operations with extended timeout for form operations
                         timeout_duration = 60 if action_name in ['fill_multiple_fields', 'fill_form'] else 30
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(tool.func, **action_params)
-                            try:
-                                result = future.result(timeout=timeout_duration)
-                            except concurrent.futures.TimeoutError:
-                                await send_log(f"Browser operation '{action_name}' timed out after {timeout_duration} seconds")
-                                # Try to continue with a partial success message instead of complete failure
-                                if action_name in ['fill_multiple_fields', 'fill_form']:
-                                    result = f"Form filling operation timed out but may have partially completed. Continuing to next step."
-                                else:
-                                    result = f"Error: Browser operation '{action_name}' timed out. This may be due to GPU/WebGL issues."
+                        try:
+                            result = await asyncio.wait_for(
+                                asyncio.to_thread(tool.func, **action_params),
+                                timeout=timeout_duration
+                            )
+                        except asyncio.TimeoutError:
+                            await send_log(f"Browser operation '{action_name}' timed out after {timeout_duration} seconds")
+                            if action_name in ['fill_multiple_fields', 'fill_form']:
+                                result = f"Form filling operation timed out but may have partially completed. Continuing to next step."
+                            else:
+                                result = f"Error: Browser operation '{action_name}' timed out. This may be due to GPU/WebGL issues."
                     else:
-                        result = tool.func(**action_params)
+                        result = await asyncio.to_thread(tool.func, **action_params)
                     
                     await send_log(f"Action Result: {str(result)[:200]}...") # Log first 200 chars
                 except Exception as e:
@@ -1056,20 +1029,18 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                                     await send_log(f"Retrying '{action_name}' with inferred browser_id '{inferred_id}' due to error: {e}")
                                     
                                     # Retry with timeout for browser operations
-                                    if action_name in browser_required_tools:
-                                        timeout_duration = 60 if action_name in ['fill_multiple_fields', 'fill_form'] else 30
-                                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                                            future = executor.submit(tool.func, **action_params)
-                                            try:
-                                                result = future.result(timeout=timeout_duration)
-                                            except concurrent.futures.TimeoutError:
-                                                if action_name in ['fill_multiple_fields', 'fill_form']:
-                                                    result = f"Form filling retry timed out but may have partially completed. Continuing to next step."
-                                                else:
-                                                    result = f"Error: Retry of '{action_name}' timed out after {timeout_duration} seconds"
-                                    else:
-                                        result = tool.func(**action_params)
-                                    
+                                    timeout_duration = 60 if action_name in ['fill_multiple_fields', 'fill_form'] else 30
+                                    try:
+                                        result = await asyncio.wait_for(
+                                            asyncio.to_thread(tool.func, **action_params),
+                                            timeout=timeout_duration
+                                        )
+                                    except asyncio.TimeoutError:
+                                        if action_name in ['fill_multiple_fields', 'fill_form']:
+                                            result = f"Form filling retry timed out but may have partially completed. Continuing to next step."
+                                        else:
+                                            result = f"Error: Retry of '{action_name}' timed out after {timeout_duration} seconds"
+
                                     await send_log(f"Action Result (after retry): {str(result)[:200]}...")
                                 else:
                                     raise e
@@ -1098,7 +1069,7 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
 
             # Self-Critique
             critique_prompt = f"Goal: {goal}\nLast Action Result: {result}\nCritique and suggest improvement."
-            critique = generate_text(critique_prompt)
+            critique = await asyncio.to_thread(generate_text, critique_prompt)
             await send_log(f"Self-Critique: {critique[:200]}...") # Log first 200 chars
 
             # 4. CHECK FOR COMPLETION OR USER INPUT NEEDED
@@ -1245,7 +1216,6 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
 def root():
     return {"message": "Multi-Cloud AI Management API is running!", "status": "healthy"}
 
-# FIX: Changed from `async def` to `def`
 @app.get('/chat/history')
 def get_chat_history(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     messages = db.query(ChatHistory).filter(ChatHistory.user_id == user.id).order_by(ChatHistory.timestamp.asc()).all()
@@ -1284,7 +1254,6 @@ async def post_chat_message(payload: Dict[str, Any], user: schemas.User = Depend
             pass
     return {"status": "ok"}
 
-# FIX: Changed from `async def` to `def`
 @app.get('/tasks/results')
 def get_task_results(user: schemas.User = Depends(get_current_user), limit: int = 50, offset: int = 0):
     """Get paginated list of task results for the current user"""
@@ -1294,7 +1263,6 @@ def get_task_results(user: schemas.User = Depends(get_current_user), limit: int 
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# FIX: Changed from `async def` to `def`
 @app.get('/tasks/statistics')
 def get_task_statistics(user: schemas.User = Depends(get_current_user)):
     """Get task statistics for the current user"""
@@ -1304,7 +1272,6 @@ def get_task_statistics(user: schemas.User = Depends(get_current_user)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# FIX: Changed from `async def` to `def`
 @app.get('/tasks/scraping')
 def get_scraping_results(user: schemas.User = Depends(get_current_user), limit: int = 20, offset: int = 0):
     """Get paginated list of scraping results for the current user"""
@@ -1314,7 +1281,6 @@ def get_scraping_results(user: schemas.User = Depends(get_current_user), limit: 
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# FIX: Changed from `async def` to `def`
 @app.get('/tasks/{task_id}')
 def get_task_details(task_id: str, user: schemas.User = Depends(get_current_user)):
     """Get detailed information about a specific task"""
@@ -1375,7 +1341,6 @@ async def websocket_chat_endpoint(websocket: WebSocket, user: schemas.User = Dep
             del active_connections[user_id]
         logging.error(f"WebSocket chat error for client {user_id}: {e}", exc_info=True)
 
-# FIX: Changed from `async def` to `def`
 @app.post('/tasks/{task_id}/chat')
 def chat_with_scraped_content(task_id: str, message: Dict[str, str], user: schemas.User = Depends(get_current_user)):
     """Chat with AI about scraped content"""
@@ -1440,7 +1405,6 @@ Please answer the user's question about this content."""
         structured_logger.error(f"Error in AI chat: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI chat error: {str(e)}")
 
-# FIX: Changed from `async def` to `def`
 @app.get('/tasks/{task_id}/download')
 def download_scraped_content(task_id: str, format: str = 'json', user: schemas.User = Depends(get_current_user)):
     """Download scraped content in various formats"""
