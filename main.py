@@ -211,8 +211,10 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
+# ... (imports and other code remain the same)
+
 @app.post("/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -227,6 +229,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     
     response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
     return response
+
+# ... (the rest of your application code remains the same)
 
 
 
