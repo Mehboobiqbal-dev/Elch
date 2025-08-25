@@ -75,16 +75,30 @@ def load_agent_memory():
         with open(MEMORY_FILE, 'r') as f:
             try:
                 data = json.load(f)
-                # Assuming 'knowledge' is the key where documents are stored
-                for doc in data.get('knowledge', []):
-                    memory.memory_instance.add_document(doc)
-                print("Agent memory loaded successfully.")
+                documents = data.get('knowledge', [])
+                if not isinstance(documents, list):
+                    print("Error: 'knowledge' in agent memory is not a list. Starting fresh.")
+                    return
+
+                doc_count = 0
+                for i, doc in enumerate(documents):
+                    if not isinstance(doc, dict):
+                        print(f"Warning: Skipping malformed document #{i} in agent memory: item is not a dictionary.")
+                        continue
+                    try:
+                        memory.memory_instance.add_document(doc)
+                        doc_count += 1
+                    except Exception as e:
+                        print(f"Warning: Skipping malformed document #{i} in agent memory. Error: {e}")
+
+                print(f"Agent memory loaded successfully. Added {doc_count} documents.")
             except json.JSONDecodeError as e:
                 print(f"Error decoding agent memory JSON: {e}")
             except Exception as e:
-                print(f"Error loading agent memory: {e}")
+                print(f"Error processing agent memory file: {e}")
     else:
         print("Agent memory file not found. Starting with empty memory.")
+
 
 def save_agent_memory():
     # Only save agent memory if NO_MEMORY is not set to true
