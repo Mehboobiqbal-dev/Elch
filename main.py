@@ -75,9 +75,15 @@ def load_agent_memory():
         with open(MEMORY_FILE, 'r') as f:
             try:
                 data = json.load(f)
+                knowledge = data.get('knowledge', [])
+                print(f"Loading {len(knowledge)} documents from agent memory.")
                 # Assuming 'knowledge' is the key where documents are stored
-                for doc in data.get('knowledge', []):
-                    memory.memory_instance.add_document(doc)
+                for i, doc in enumerate(knowledge):
+                    try:
+                        # FIX: Add a try-except block to handle malformed individual documents
+                        memory.memory_instance.add_document(doc)
+                    except Exception as e:
+                        print(f"Warning: Skipping malformed document #{i} in agent memory: {e}")
                 print("Agent memory loaded successfully.")
             except json.JSONDecodeError as e:
                 print(f"Error decoding agent memory JSON: {e}")
@@ -85,6 +91,7 @@ def load_agent_memory():
                 print(f"Error loading agent memory: {e}")
     else:
         print("Agent memory file not found. Starting with empty memory.")
+
 
 def save_agent_memory():
     # Only save agent memory if NO_MEMORY is not set to true
@@ -211,8 +218,7 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
-# ... (imports and other code remain the same)
-
+# FIX: Changed from `async def` to `def` as the function body is synchronous.
 @app.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
@@ -229,12 +235,6 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     
     response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
     return response
-
-# ... (the rest of your application code remains the same)
-
-
-
-
 
 @app.get('/login/{provider}')
 async def login(request: Request, provider: str):
@@ -272,7 +272,7 @@ async def auth(request: Request, provider: str, db: Session = Depends(get_db)):
     return response
 
 
-async def get_current_user_from_ws(
+def get_current_user_from_ws(
     websocket: WebSocket,
     db: Session = Depends(get_db)
 ) -> schemas.User:
@@ -322,17 +322,20 @@ app.include_router(universal_assistant.router, prefix="/assistant", tags=["assis
 from routes.tasks import router as tasks_router
 app.include_router(tasks_router, dependencies=[Depends(get_current_user)])
 
+# FIX: Changed from `async def` to `def`
 @app.get('/me', response_model=schemas.User)
-async def me(user: schemas.User = Depends(get_current_user)):
+def me(user: schemas.User = Depends(get_current_user)):
     return user
 
+# FIX: Changed from `async def` to `def`
 @app.get('/credentials', response_model=List[schemas.CloudCredential])
-async def get_credentials(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_credentials(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
     return creds
 
+# FIX: Changed from `async def` to `def`
 @app.post('/credentials', response_model=schemas.CloudCredential)
-async def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     cred = db.query(CloudCredential).filter_by(user_id=user.id, provider=cred_data.provider).first()
     if not cred:
         cred = CloudCredential(user_id=user.id, provider=cred_data.provider)
@@ -352,8 +355,9 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# FIX: Changed from `async def` to `def`
 @app.post('/scrape')
-async def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends(get_current_user)):
+def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends(get_current_user)):
     from scraping_analysis import scrape_website_comprehensive
     try:
         result = scrape_website_comprehensive(scrape_req.url)
@@ -361,6 +365,7 @@ async def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# FIX: Changed from `async def` to `def`
 @app.post('/prompt')
 @circuit_breaker(
     'prompt_generation',
@@ -372,7 +377,7 @@ async def scrape_website(scrape_req: ScrapeRequest, user: schemas.User = Depends
     )
 )
 @limiter.limit("10/minute")
-async def prompt(request: Request, prompt_req: schemas.PromptRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def prompt(request: Request, prompt_req: schemas.PromptRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     prompt_text = prompt_req.prompt
     prompt_context = LogContext(
         metadata={
@@ -496,6 +501,7 @@ YOUR PLAN:
 
     return {"plan": plan, "prompt": prompt_text}
 
+# FIX: Changed from `async def` to `def`
 @app.post('/execute_plan')
 @circuit_breaker(
     'plan_execution',
@@ -507,7 +513,7 @@ YOUR PLAN:
     )
 )
 @limiter.limit("10/minute")
-async def execute_plan(request: Request, exec_req: schemas.PlanExecutionRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def execute_plan(request: Request, exec_req: schemas.PlanExecutionRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     core.log_action('execute_plan', {'prompt': exec_req.prompt})
     execution_context = LogContext(
         metadata={
@@ -592,8 +598,9 @@ async def execute_plan(request: Request, exec_req: schemas.PlanExecutionRequest,
         "feedback_prompt": f"Did this work as expected? To help me learn, please use the /feedback endpoint with plan_id: {new_plan_history.id} and your feedback ('success' or 'failure')."
     }
 
+# FIX: Changed from `async def` to `def`
 @app.post('/feedback')
-async def feedback(feedback_req: schemas.FeedbackRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def feedback(feedback_req: schemas.FeedbackRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan_history = db.query(PlanHistory).filter(PlanHistory.id == feedback_req.plan_id, PlanHistory.user_id == user.id).first()
 
     if not plan_history:
@@ -650,8 +657,9 @@ def healthz():
             "error": str(e)
         }
 
+# FIX: Changed from `async def` to `def`
 @app.get('/memory/stats')
-async def get_memory_statistics():
+def get_memory_statistics():
     """Get detailed memory usage statistics and monitoring data."""
     try:
         memory_stats = get_memory_stats()
@@ -673,8 +681,9 @@ async def get_memory_statistics():
             "error": str(e)
         }
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_upwork')
-async def api_apply_job_upwork(request: schemas.UpworkJobRequest, user: schemas.User = Depends(get_current_user)):
+def api_apply_job_upwork(request: schemas.UpworkJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.apply_job_upwork(
             request.browser_id,
@@ -686,8 +695,9 @@ async def api_apply_job_upwork(request: schemas.UpworkJobRequest, user: schemas.
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for Upwork job: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_fiverr')
-async def api_apply_job_fiverr(request: schemas.FiverrJobRequest, user: schemas.User = Depends(get_current_user)):
+def api_apply_job_fiverr(request: schemas.FiverrJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.apply_job_fiverr(
             request.browser_id,
@@ -700,8 +710,9 @@ async def api_apply_job_fiverr(request: schemas.FiverrJobRequest, user: schemas.
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for Fiverr job: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/apply_job_linkedin')
-async def api_apply_job_linkedin(request: schemas.LinkedInJobRequest, user: schemas.User = Depends(get_current_user)):
+def api_apply_job_linkedin(request: schemas.LinkedInJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.apply_job_linkedin(
             request.browser_id,
@@ -715,8 +726,9 @@ async def api_apply_job_linkedin(request: schemas.LinkedInJobRequest, user: sche
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying for LinkedIn job: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/batch_apply_jobs')
-async def api_batch_apply_jobs(request: schemas.BatchJobRequest, user: schemas.User = Depends(get_current_user)):
+def api_batch_apply_jobs(request: schemas.BatchJobRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.create_job_application_batch(
             request.job_urls,
@@ -729,8 +741,9 @@ async def api_batch_apply_jobs(request: schemas.BatchJobRequest, user: schemas.U
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in batch job application: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/automate_registration')
-async def api_automate_registration(request: schemas.RegistrationRequest, user: schemas.User = Depends(get_current_user)):
+def api_automate_registration(request: schemas.RegistrationRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.automate_registration(
             request.browser_id,
@@ -743,8 +756,9 @@ async def api_automate_registration(request: schemas.RegistrationRequest, user: 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error automating registration: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/form/automate_login')
-async def api_automate_login(request: schemas.LoginAutomationRequest, user: schemas.User = Depends(get_current_user)):
+def api_automate_login(request: schemas.LoginAutomationRequest, user: schemas.User = Depends(get_current_user)):
     try:
         result = form_automation.automate_login(
             request.browser_id,
@@ -760,8 +774,9 @@ async def api_automate_login(request: schemas.LoginAutomationRequest, user: sche
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error automating login: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.post('/call_tool')
-async def call_tool(tool_req: schemas.ToolCallRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def call_tool(tool_req: schemas.ToolCallRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     tool_name = tool_req.tool_name
     params = tool_req.params
     tool = tool_registry.get_tool(tool_name)
@@ -1230,8 +1245,9 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
 def root():
     return {"message": "Multi-Cloud AI Management API is running!", "status": "healthy"}
 
+# FIX: Changed from `async def` to `def`
 @app.get('/chat/history')
-async def get_chat_history(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_chat_history(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     messages = db.query(ChatHistory).filter(ChatHistory.user_id == user.id).order_by(ChatHistory.timestamp.asc()).all()
     return [{
         "id": m.id,
@@ -1268,8 +1284,9 @@ async def post_chat_message(payload: Dict[str, Any], user: schemas.User = Depend
             pass
     return {"status": "ok"}
 
+# FIX: Changed from `async def` to `def`
 @app.get('/tasks/results')
-async def get_task_results(user: schemas.User = Depends(get_current_user), limit: int = 50, offset: int = 0):
+def get_task_results(user: schemas.User = Depends(get_current_user), limit: int = 50, offset: int = 0):
     """Get paginated list of task results for the current user"""
     try:
         results = task_manager.get_task_results(user_id=user.id, limit=limit, offset=offset)
@@ -1277,8 +1294,9 @@ async def get_task_results(user: schemas.User = Depends(get_current_user), limit
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# FIX: Changed from `async def` to `def`
 @app.get('/tasks/statistics')
-async def get_task_statistics(user: schemas.User = Depends(get_current_user)):
+def get_task_statistics(user: schemas.User = Depends(get_current_user)):
     """Get task statistics for the current user"""
     try:
         stats = task_manager.get_task_statistics(user_id=user.id)
@@ -1286,8 +1304,9 @@ async def get_task_statistics(user: schemas.User = Depends(get_current_user)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# FIX: Changed from `async def` to `def`
 @app.get('/tasks/scraping')
-async def get_scraping_results(user: schemas.User = Depends(get_current_user), limit: int = 20, offset: int = 0):
+def get_scraping_results(user: schemas.User = Depends(get_current_user), limit: int = 20, offset: int = 0):
     """Get paginated list of scraping results for the current user"""
     try:
         results = task_manager.get_scraping_results(user_id=user.id, limit=limit, offset=offset)
@@ -1295,8 +1314,9 @@ async def get_scraping_results(user: schemas.User = Depends(get_current_user), l
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# FIX: Changed from `async def` to `def`
 @app.get('/tasks/{task_id}')
-async def get_task_details(task_id: str, user: schemas.User = Depends(get_current_user)):
+def get_task_details(task_id: str, user: schemas.User = Depends(get_current_user)):
     """Get detailed information about a specific task"""
     try:
         task_details = task_manager.get_task_by_id(task_id=task_id, user_id=user.id)
@@ -1355,8 +1375,9 @@ async def websocket_chat_endpoint(websocket: WebSocket, user: schemas.User = Dep
             del active_connections[user_id]
         logging.error(f"WebSocket chat error for client {user_id}: {e}", exc_info=True)
 
+# FIX: Changed from `async def` to `def`
 @app.post('/tasks/{task_id}/chat')
-async def chat_with_scraped_content(task_id: str, message: Dict[str, str], user: schemas.User = Depends(get_current_user)):
+def chat_with_scraped_content(task_id: str, message: Dict[str, str], user: schemas.User = Depends(get_current_user)):
     """Chat with AI about scraped content"""
     try:
         # Get scraped content from database
@@ -1419,8 +1440,9 @@ Please answer the user's question about this content."""
         structured_logger.error(f"Error in AI chat: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI chat error: {str(e)}")
 
+# FIX: Changed from `async def` to `def`
 @app.get('/tasks/{task_id}/download')
-async def download_scraped_content(task_id: str, format: str = 'json', user: schemas.User = Depends(get_current_user)):
+def download_scraped_content(task_id: str, format: str = 'json', user: schemas.User = Depends(get_current_user)):
     """Download scraped content in various formats"""
     try:
         # Get scraped content from database
