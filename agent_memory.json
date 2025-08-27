@@ -62,6 +62,46 @@
           "user_input": "https://pageviews.wmcloud.org/topviews/?project=en.wikipedia.org&platform=all-access&date=yesterday&excludes="
         }
       }
+    },
+    {
+      "timestamp": "2025-08-26 22:07:41.111686",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "https://udb.gov.pk/result.php?pn=2&search=%D8%A7 scrape all it's data "
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-26 22:18:32.130769",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "https://udb.gov.pk/result.php?pn=2&search=%D8%A7 scrape data it's data"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-26 22:37:41.332364",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "https://udb.gov.pk/result.php?pn=2&search=%D8%A7 scrape data it's data"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-27 10:17:21.186485",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "scrape all of it's data https://udb.gov.pk/result.php?pn=2&search=%D8%A7"
+        }
+      }
     }
   ],
   "errors": [
@@ -101,6 +141,27 @@
             }
           ]
         }
+      }
+    },
+    {
+      "timestamp": "2025-08-26 22:18:39.889145",
+      "error": "500: Gemini text generation failed after 3 attempts: 400 API key not valid. Please pass a valid API key. [reason: \"API_KEY_INVALID\"\ndomain: \"googleapis.com\"\nmetadata {\n  key: \"service\"\n  value: \"generativelanguage.googleapis.com\"\n}\n, locale: \"en-US\"\nmessage: \"API key not valid. Please pass a valid API key.\"\n]",
+      "context": {
+        "goal": "https://udb.gov.pk/result.php?pn=2&search=%D8%A7 scrape data it's data"
+      }
+    },
+    {
+      "timestamp": "2025-08-26 22:38:59.235464",
+      "error": "429: Multiple Gemini API keys have exceeded quota after 36 attempts. Please try again later.",
+      "context": {
+        "goal": "https://udb.gov.pk/result.php?pn=2&search=%D8%A7 scrape data it's data"
+      }
+    },
+    {
+      "timestamp": "2025-08-27 10:19:33.859758",
+      "error": "429: Multiple Gemini API keys have exceeded quota after 22 attempts. Please try again later.",
+      "context": {
+        "goal": "scrape all of it's data https://udb.gov.pk/result.php?pn=2&search=%D8%A7"
       }
     }
   ]

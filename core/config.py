@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     INITIAL_RETRY_DELAY: float = float(os.environ.get("INITIAL_RETRY_DELAY", 2.0))
     MAX_RETRY_DELAY: float = float(os.environ.get("MAX_RETRY_DELAY", 60.0))
     NETWORK_TIMEOUT: int = int(os.environ.get("NETWORK_TIMEOUT", 30))
+
+    # Gemini rate limiting (project quotas are often per-project, not per-key)
+    GEMINI_RPM_PER_KEY: int = int(os.environ.get("GEMINI_RPM_PER_KEY", 15))
+    GEMINI_RATE_WINDOW_SECONDS: int = int(os.environ.get("GEMINI_RATE_WINDOW_SECONDS", 60))
+    GEMINI_MAX_CYCLES: int = int(os.environ.get("GEMINI_MAX_CYCLES", 2))
     
     # Circuit breaker settings
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = int(os.environ.get("CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5))

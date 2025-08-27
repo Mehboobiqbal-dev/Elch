@@ -7,6 +7,8 @@ from typing import List
 import google.generativeai as genai
 from rate_limiter import rate_limiter
 import itertools
+from time import sleep
+import hashlib
 
 # Generation Config
 generation_config = {
@@ -26,6 +28,17 @@ safety_settings = [
 
 # No global configuration; will configure per call in functions
 
+def _is_quota_error(e: Exception) -> bool:
+    """Best-effort detection of quota/rate limit errors across different SDK versions."""
+    try:
+        if isinstance(e, ResourceExhausted):
+            return True
+    except Exception:
+        pass
+    msg = str(e).lower()
+    return ("quota" in msg) or ("rate limit" in msg) or ("429" in msg) or ("too many requests" in msg)
+
+
 def generate_text(prompt: str) -> str:
     """
     Generates text using the Gemini Pro model with cycling API key failover.
@@ -43,15 +56,34 @@ def generate_text(prompt: str) -> str:
         api_keys.append(settings.GEMINI_API_KEY)
         logging.info(f"Added single GEMINI_API_KEY as backup")
     
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for k in api_keys:
+        if k and k not in seen:
+            deduped.append(k)
+            seen.add(k)
+        else:
+            logging.warning("Duplicate Gemini API key detected; skipping a duplicate entry.")
+    api_keys = deduped
+    
     if not api_keys:
         raise HTTPException(status_code=500, detail="No Gemini API keys configured.")
 
-    logging.info(f"Starting Gemini generation with {len(api_keys)} available API keys")
+    # Use env-configured limits/cycles
+    rpm = max(1, int(getattr(settings, "GEMINI_RPM_PER_KEY", 15)))
+    window = max(1, int(getattr(settings, "GEMINI_RATE_WINDOW_SECONDS", 60)))
+    max_cycles = max(1, int(getattr(settings, "GEMINI_MAX_CYCLES", 2)))
+
+    logging.info(
+        f"Starting Gemini generation with {len(api_keys)} keys, model={settings.GEMINI_MODEL_NAME}, "
+        f"rpm/key={rpm}, window={window}s, cycles={max_cycles}"
+    )
     
     last_exception = None
     quota_exhausted_count = 0
     attempts = 0
-    max_attempts = len(api_keys) * 3  # Maximum 3 cycles through all keys
+    max_attempts = len(api_keys) * max_cycles
 
     for key in itertools.cycle(api_keys):
         if attempts >= max_attempts:
@@ -61,15 +93,15 @@ def generate_text(prompt: str) -> str:
         
         try:
             # Apply rate limiting per API key
-            key_id = f"gemini_{key_prefix}"
-            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=50, window_seconds=60)
+            key_id = f"gemini_{hashlib.sha256(key.encode()).hexdigest()[:10]}"
+            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=rpm, window_seconds=window)
             
             if remaining <= 0:
                 logging.warning(f"Rate limit reached for Gemini key ({key_prefix}...), skipping to next")
                 continue
                 
             # Wait if needed to avoid hitting rate limits
-            rate_limiter.wait_if_needed(key_id, max_requests=50, window_seconds=60)
+            rate_limiter.wait_if_needed(key_id, max_requests=rpm, window_seconds=window)
             
             logging.info(f"Attempt {attempts}: Trying Gemini generation with key ({key_prefix}...) - {remaining} requests remaining")
             
@@ -87,11 +119,15 @@ def generate_text(prompt: str) -> str:
             quota_exhausted_count += 1
             logging.warning(f"❌ Gemini quota exceeded for key ({key_prefix}...): {e}")
             last_exception = e
+            sleep(min(5, 1 + quota_exhausted_count))
             continue
             
         except Exception as e:
             logging.warning(f"❌ Gemini error with key ({key_prefix}...): {e}")
             last_exception = e
+            if _is_quota_error(e):
+                quota_exhausted_count += 1
+                sleep(1)
             continue
 
     # If we reach here, all attempts failed
@@ -119,6 +155,17 @@ def generate_text_with_image(prompt: str, image_path: str) -> str:
         api_keys.append(settings.GEMINI_API_KEY)
         logging.info(f"Added single GEMINI_API_KEY as backup for vision")
     
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for k in api_keys:
+        if k and k not in seen:
+            deduped.append(k)
+            seen.add(k)
+        else:
+            logging.warning("Duplicate Gemini API key detected for vision; skipping a duplicate entry.")
+    api_keys = deduped
+    
     if not api_keys:
         raise HTTPException(status_code=500, detail="No Gemini API keys configured for vision.")
 
@@ -127,7 +174,7 @@ def generate_text_with_image(prompt: str, image_path: str) -> str:
     last_exception = None
     quota_exhausted_count = 0
     attempts = 0
-    max_attempts = len(api_keys) * 3
+    max_attempts = len(api_keys) * max_cycles
 
     for key in itertools.cycle(api_keys):
         if attempts >= max_attempts:
@@ -137,15 +184,15 @@ def generate_text_with_image(prompt: str, image_path: str) -> str:
         
         try:
             # Apply rate limiting per API key
-            key_id = f"gemini_vision_{key_prefix}"
-            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=50, window_seconds=60)
+            key_id = f"gemini_vision_{hashlib.sha256(key.encode()).hexdigest()[:10]}"
+            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=rpm, window_seconds=window)
             
             if remaining <= 0:
                 logging.warning(f"Rate limit reached for Gemini vision key ({key_prefix}...), skipping to next")
                 continue
                 
             # Wait if needed to avoid hitting rate limits
-            rate_limiter.wait_if_needed(key_id, max_requests=50, window_seconds=60)
+            rate_limiter.wait_if_needed(key_id, max_requests=rpm, window_seconds=window)
             
             logging.info(f"Attempt {attempts}: Trying Gemini vision generation with key ({key_prefix}...) - {remaining} requests remaining")
             
@@ -160,11 +207,15 @@ def generate_text_with_image(prompt: str, image_path: str) -> str:
             quota_exhausted_count += 1
             logging.warning(f"❌ Gemini vision quota exceeded for key ({key_prefix}...): {e}")
             last_exception = e
+            sleep(min(5, 1 + quota_exhausted_count))
             continue
             
         except Exception as e:
             logging.warning(f"❌ Gemini vision error with key ({key_prefix}...): {e}")
             last_exception = e
+            if _is_quota_error(e):
+                quota_exhausted_count += 1
+                sleep(1)
             continue
 
     # If we reach here, all attempts failed

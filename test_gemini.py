@@ -1,45 +1,66 @@
 import google.generativeai as genai
 import os
+from pathlib import Path
 
-# --- Configuration ---
-# It's recommended to use environment variables for the API key in a real application.
-# For this test, we'll use a hardcoded key to ensure it's not a loading issue.
-API_KEY = "AIzaSyDyk2EZjWXFL3YiRQyd6LdbXGQ72OcmCDg"
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
 
-# --- Test Script ---
-def test_gemini_api():
-    """
-    Tests the Gemini API connection and a simple text generation call.
-    """
-    print("--- Starting Gemini API Test ---")
+# Load .env files to populate environment variables
+# Prefer root .env, then backend/.env (if they exist), mirroring core/config.py behavior
+project_root = Path(__file__).resolve().parent
+root_env = project_root / ".env"
+backend_env = project_root / "backend" / ".env"
 
-    # 1. Configure the API key
+if load_dotenv:
+    if root_env.exists():
+        load_dotenv(dotenv_path=root_env)
+    if backend_env.exists():
+        load_dotenv(dotenv_path=backend_env)
+
+# Load keys from env: prefer GEMINI_API_KEYS (comma-separated), fall back to GEMINI_API_KEY
+raw_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
+api_keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+
+if not api_keys:
+    print("No Gemini API keys configured in environment.")
+    print("Checked .env at:", root_env, "and", backend_env)
+    exit(1)
+
+# Deduplicate while preserving order
+seen = set()
+keys = []
+for k in api_keys:
+    if k not in seen:
+        keys.append(k)
+        seen.add(k)
+
+MODEL = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-pro")
+
+
+def try_key(k: str) -> bool:
     try:
-        genai.configure(api_key=API_KEY)
-        print("✅ API key configured successfully.")
+        genai.configure(api_key=k)
+        model = genai.GenerativeModel(MODEL)
+        resp = model.generate_content("ping")
+        text = getattr(resp, "text", "<no text>") or "<empty>"
+        print("OK:", text[:120].replace("\n", " ") + ("..." if len(text) > 120 else ""))
+        return True
     except Exception as e:
-        print(f"❌ Failed to configure API key: {e}")
-        return
+        print("ERR:", str(e))
+        return False
 
-    # 2. Initialize the model
-    try:
-        model = genai.GenerativeModel('gemini-pro')
-        print("✅ Generative model initialized successfully.")
-    except Exception as e:
-        print(f"❌ Failed to initialize model: {e}")
-        return
 
-    # 3. Generate content
-    prompt = "Hello, Gemini! Please say 'Hello, World!'."
-    print(f"\nSending prompt: '{prompt}'")
-    try:
-        response = model.generate_content(prompt)
-        print(f"✅ API call successful.")
-        print(f"Response Text: {response.text}")
-    except Exception as e:
-        print(f"❌ API call failed: {e}")
+def main():
+    print(f"Testing {len(keys)} Gemini keys against model '{MODEL}'...")
+    success = 0
+    for idx, k in enumerate(keys, 1):
+        print(f"[{idx}/{len(keys)}] Trying key prefix {k[:10]}...")
+        if try_key(k):
+            success += 1
+    print(f"Done. Success {success}/{len(keys)}.")
 
-    print("\n--- Test Complete ---")
 
 if __name__ == "__main__":
-    test_gemini_api()
+    main()
