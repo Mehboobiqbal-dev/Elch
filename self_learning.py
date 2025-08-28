@@ -17,10 +17,22 @@ class SelfLearningCore:
         logging.basicConfig(level=logging.INFO, filename='agent.log', format='%(asctime)s - %(levelname)s - %(message)s')
 
     def load_memory(self) -> Dict:
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, 'r') as f:
-                return json.load(f)
-        return {'knowledge': [], 'errors': [], 'improvements': []}
+        try:
+            if os.path.exists(MEMORY_FILE):
+                with open(MEMORY_FILE, 'r') as f:
+                    data = json.load(f)
+                    # Ensure all required keys exist
+                    if 'knowledge' not in data:
+                        data['knowledge'] = []
+                    if 'errors' not in data:
+                        data['errors'] = []
+                    if 'improvements' not in data:
+                        data['improvements'] = []
+                    return data
+            return {'knowledge': [], 'errors': [], 'improvements': []}
+        except (json.JSONDecodeError, IOError) as e:
+            logging.warning(f"Failed to load memory file: {e}. Creating new memory structure.")
+            return {'knowledge': [], 'errors': [], 'improvements': []}
 
     def save_memory(self):
         """Save memory to file with structured logging."""
@@ -104,6 +116,10 @@ class SelfLearningCore:
                     }
                 )
                 
+                # Ensure improvements list exists
+                if 'improvements' not in self.memory:
+                    self.memory['improvements'] = []
+
                 # Check for common parameter naming mistakes
                 if "unexpected keyword argument 'css_selector'" in error and 'action' in context and 'params' in context:
                     action = context['action']
@@ -129,19 +145,26 @@ class SelfLearningCore:
 
                 # If no immediate fix and web search is enabled, search for solutions
                 if getattr(settings, 'ENABLE_SELF_LEARNING', True):
-                    fix = self.search_for_fix(error)
-                    if fix:
-                        confidence = self.assess_confidence(fix)
-                        if confidence > 0.75:
-                            self.apply_fix(fix, context)
-                        improvement = {'error': error, 'fix': fix, 'confidence': confidence}
-                        self.memory['improvements'].append(improvement)
-                        self.save_memory()
-                        
+                    try:
+                        fix = self.search_for_fix(error)
+                        if fix:
+                            confidence = self.assess_confidence(fix)
+                            if confidence > 0.75:
+                                self.apply_fix(fix, context)
+                            improvement = {'error': error, 'fix': fix, 'confidence': confidence}
+                            self.memory['improvements'].append(improvement)
+                            self.save_memory()
+
+                            structured_logger.log_self_learning_event(
+                                "Improvement generated from search",
+                                learning_context,
+                                improvement
+                            )
+                    except Exception as search_error:
                         structured_logger.log_self_learning_event(
-                            "Improvement generated from search",
+                            "Web search failed for error learning",
                             learning_context,
-                            improvement
+                            {"search_error": str(search_error)}
                         )
                         
         except Exception as e:

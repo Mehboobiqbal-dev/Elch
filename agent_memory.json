@@ -6,9 +6,111 @@
     "{\"timestamp\": \"2025-08-27 22:12:43.675141\", \"type\": \"action\", \"content\": {\"action\": \"agent_run\", \"details\": {\"user_input\": \"hi \"}}}",
     "{\"type\": \"user_goal\", \"content\": \"hi\", \"timestamp\": \"2025-08-28T19:55:40.728513\"}",
     "{\"type\": \"user_goal\", \"content\": \"hi\", \"timestamp\": \"2025-08-28T20:08:07.208892\"}",
-    "{\"type\": \"user_goal\", \"content\": \"hi\", \"timestamp\": \"2025-08-28T20:16:46.530894\"}",
-    "{\"type\": \"user_goal\", \"content\": \"hi\", \"timestamp\": \"2025-08-28T20:31:44.971553\"}",
-    "{\"type\": \"user_goal\", \"content\": \"what is your name\", \"timestamp\": \"2025-08-28T20:35:29.393580\"}",
-    "{\"type\": \"user_goal\", \"content\": \"hi\", \"timestamp\": \"2025-08-28T20:35:48.278301\"}"
+    {
+      "timestamp": "2025-08-28 20:16:46.525364",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "hi"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 20:31:44.969055",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "hi"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 20:35:29.387291",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "what is your name"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 20:35:48.269251",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "hi"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 20:46:08.953149",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "scrape all it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 21:02:49.971927",
+      "type": "action",
+      "content": {
+        "action": "agent_run",
+        "details": {
+          "user_input": "scrape all of it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    }
+  ],
+  "errors": [
+    {
+      "timestamp": "2025-08-28 21:04:42.591533",
+      "error": "Failed to open browser after 3 attempts: Message: timeout: Timed out receiving message from renderer: 28.703\n  (Session info: chrome=139.0.7258.139)\nStacktrace:\n\tGetHandleVerifier [0x0x7ff7421c3d85+79397]\n\tGetHandleVerifier [0x0x7ff7421c3de0+79488]\n\t(No symbol) [0x0x7ff741f6c0fa]\n\t(No symbol) [0x0x7ff741f59a0c]\n\t(No symbol) [0x0x7ff741f596fa]\n\t(No symbol) [0x0x7ff741f572cb]\n\t(No symbol) [0x0x7ff741f57d2f]\n\t(No symbol) [0x0x7ff741f6695e]\n\t(No symbol) [0x0x7ff741f7c921]\n\t(No symbol) [0x0x7ff741f83a8a]\n\t(No symbol) [0x0x7ff741f584cd]\n\t(No symbol) [0x0x7ff741f7c653]\n\t(No symbol) [0x0x7ff742013699]\n\t(No symbol) [0x0x7ff741feaf73]\n\t(No symbol) [0x0x7ff741fb41b1]\n\t(No symbol) [0x0x7ff741fb4f43]\n\tGetHandleVerifier [0x0x7ff74248e1ed+3005069]\n\tGetHandleVerifier [0x0x7ff74248831d+2980797]\n\tGetHandleVerifier [0x0x7ff7424a7e0d+3110573]\n\tGetHandleVerifier [0x0x7ff7421dd6de+184190]\n\tGetHandleVerifier [0x0x7ff7421e516f+215567]\n\tGetHandleVerifier [0x0x7ff7421cc974+115220]\n\tGetHandleVerifier [0x0x7ff7421ccb29+115657]\n\tGetHandleVerifier [0x0x7ff7421b3268+11016]\n\tBaseThreadInitThunk [0x0x7ffcedf8e8d7+23]\n\tRtlUserThreadStart [0x0x7ffcee85c34c+44]\n",
+      "context": {
+        "goal": "scrape all of it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html",
+        "action": "open_browser",
+        "params": {
+          "url": "https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 21:07:39.397713",
+      "error": "Failed to open browser after 3 attempts: Message: timeout: Timed out receiving message from renderer: 16.881\n  (Session info: chrome=139.0.7258.139)\nStacktrace:\n\tGetHandleVerifier [0x0x7ff7421c3d85+79397]\n\tGetHandleVerifier [0x0x7ff7421c3de0+79488]\n\t(No symbol) [0x0x7ff741f6c0fa]\n\t(No symbol) [0x0x7ff741f59a0c]\n\t(No symbol) [0x0x7ff741f596fa]\n\t(No symbol) [0x0x7ff741f572cb]\n\t(No symbol) [0x0x7ff741f57d2f]\n\t(No symbol) [0x0x7ff741f6695e]\n\t(No symbol) [0x0x7ff741f7c921]\n\t(No symbol) [0x0x7ff741f83a8a]\n\t(No symbol) [0x0x7ff741f584cd]\n\t(No symbol) [0x0x7ff741f7c653]\n\t(No symbol) [0x0x7ff742013699]\n\t(No symbol) [0x0x7ff741feaf73]\n\t(No symbol) [0x0x7ff741fb41b1]\n\t(No symbol) [0x0x7ff741fb4f43]\n\tGetHandleVerifier [0x0x7ff74248e1ed+3005069]\n\tGetHandleVerifier [0x0x7ff74248831d+2980797]\n\tGetHandleVerifier [0x0x7ff7424a7e0d+3110573]\n\tGetHandleVerifier [0x0x7ff7421dd6de+184190]\n\tGetHandleVerifier [0x0x7ff7421e516f+215567]\n\tGetHandleVerifier [0x0x7ff7421cc974+115220]\n\tGetHandleVerifier [0x0x7ff7421ccb29+115657]\n\tGetHandleVerifier [0x0x7ff7421b3268+11016]\n\tBaseThreadInitThunk [0x0x7ffcedf8e8d7+23]\n\tRtlUserThreadStart [0x0x7ffcee85c34c+44]\n",
+      "context": {
+        "goal": "scrape all of it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html",
+        "action": "open_browser",
+        "params": {
+          "url": "https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 21:10:20.719409",
+      "error": "Failed to open browser after 3 attempts: Message: timeout: Timed out receiving message from renderer: 28.261\n  (Session info: chrome=139.0.7258.139)\nStacktrace:\n\tGetHandleVerifier [0x0x7ff7421c3d85+79397]\n\tGetHandleVerifier [0x0x7ff7421c3de0+79488]\n\t(No symbol) [0x0x7ff741f6c0fa]\n\t(No symbol) [0x0x7ff741f59a0c]\n\t(No symbol) [0x0x7ff741f596fa]\n\t(No symbol) [0x0x7ff741f572cb]\n\t(No symbol) [0x0x7ff741f57d2f]\n\t(No symbol) [0x0x7ff741f6695e]\n\t(No symbol) [0x0x7ff741f7c921]\n\t(No symbol) [0x0x7ff741f83a8a]\n\t(No symbol) [0x0x7ff741f584cd]\n\t(No symbol) [0x0x7ff741f7c653]\n\t(No symbol) [0x0x7ff742013699]\n\t(No symbol) [0x0x7ff741feaf73]\n\t(No symbol) [0x0x7ff741fb41b1]\n\t(No symbol) [0x0x7ff741fb4f43]\n\tGetHandleVerifier [0x0x7ff74248e1ed+3005069]\n\tGetHandleVerifier [0x0x7ff74248831d+2980797]\n\tGetHandleVerifier [0x0x7ff7424a7e0d+3110573]\n\tGetHandleVerifier [0x0x7ff7421dd6de+184190]\n\tGetHandleVerifier [0x0x7ff7421e516f+215567]\n\tGetHandleVerifier [0x0x7ff7421cc974+115220]\n\tGetHandleVerifier [0x0x7ff7421ccb29+115657]\n\tGetHandleVerifier [0x0x7ff7421b3268+11016]\n\tBaseThreadInitThunk [0x0x7ffcedf8e8d7+23]\n\tRtlUserThreadStart [0x0x7ffcee85c34c+44]\n",
+      "context": {
+        "goal": "scrape all of it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html",
+        "action": "open_browser",
+        "params": {
+          "url": "https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    },
+    {
+      "timestamp": "2025-08-28 21:12:52.472781",
+      "error": "Failed to open browser after 3 attempts: Message: timeout: Timed out receiving message from renderer: -0.007\n  (Session info: chrome=139.0.7258.139)\nStacktrace:\n\tGetHandleVerifier [0x0x7ff7421c3d85+79397]\n\tGetHandleVerifier [0x0x7ff7421c3de0+79488]\n\t(No symbol) [0x0x7ff741f6c0fa]\n\t(No symbol) [0x0x7ff741f59a0c]\n\t(No symbol) [0x0x7ff741f596fa]\n\t(No symbol) [0x0x7ff741f572cb]\n\t(No symbol) [0x0x7ff741f57d2f]\n\t(No symbol) [0x0x7ff741f6695e]\n\t(No symbol) [0x0x7ff741f7c921]\n\t(No symbol) [0x0x7ff741f83a8a]\n\t(No symbol) [0x0x7ff741f584cd]\n\t(No symbol) [0x0x7ff741f7c653]\n\t(No symbol) [0x0x7ff74201321d]\n\t(No symbol) [0x0x7ff741feaf73]\n\t(No symbol) [0x0x7ff741fb41b1]\n\t(No symbol) [0x0x7ff741fb4f43]\n\tGetHandleVerifier [0x0x7ff74248e1ed+3005069]\n\tGetHandleVerifier [0x0x7ff74248831d+2980797]\n\tGetHandleVerifier [0x0x7ff7424a7e0d+3110573]\n\tGetHandleVerifier [0x0x7ff7421dd6de+184190]\n\tGetHandleVerifier [0x0x7ff7421e516f+215567]\n\tGetHandleVerifier [0x0x7ff7421cc974+115220]\n\tGetHandleVerifier [0x0x7ff7421ccb29+115657]\n\tGetHandleVerifier [0x0x7ff7421b3268+11016]\n\tBaseThreadInitThunk [0x0x7ffcedf8e8d7+23]\n\tRtlUserThreadStart [0x0x7ffcee85c34c+44]\n",
+      "context": {
+        "goal": "scrape all of it's data https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html",
+        "action": "open_browser",
+        "params": {
+          "url": "https://subtitlecat.com/subs/715/Vash%20%282023%29%20English%20Subtitle.html"
+        }
+      }
+    }
   ]
 }

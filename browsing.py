@@ -247,24 +247,68 @@ def open_browser(url: str, max_retries: int = None, retry_delay: float = None) -
             options.add_argument("--disable-blink-features=AutomationControlled")
             options.add_argument("--disable-web-security")
             options.add_argument("--disable-features=dsp")
+            # Enhanced Chrome options for better stability and timeout handling
             options.add_argument("--disable-logging")
             options.add_argument("--disable-login-animations")
             options.add_argument("--disable-smooth-scrolling")
             options.add_argument("--page-load-strategy=eager")  # Interactive instead of complete
             options.add_argument("--dns-prefetch-disable")  # Network optimization
+            options.add_argument("--disable-background-timer-throttling")  # Better performance
+            options.add_argument("--disable-backgrounding-occluded-windows")
+            options.add_argument("--disable-renderer-backgrounding")
+            options.add_argument("--no-first-run")
+            options.add_argument("--no-default-browser-check")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-plugins")
+            options.add_argument("--disable-images")  # Speed up loading
+            options.add_argument("--disable-javascript")  # For scraping only, re-enable if needed
+            options.add_argument("--headless=new")  # Use new headless mode for better stability
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--disable-gpu")  # Disable GPU acceleration
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
             options.add_experimental_option('useAutomationExtension', False)
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
-            
-            driver = webdriver.Chrome(options=options)
-            driver.set_page_load_timeout(30)  # 30 seconds timeout
-            driver.set_script_timeout(30)
-            
+            options.add_experimental_option("prefs", {
+                "profile.managed_default_content_settings.images": 2,  # Block images
+                "profile.managed_default_content_settings.stylesheets": 2,  # Block CSS
+                "profile.managed_default_content_settings.plugins": 2,  # Block plugins
+            })
+
+            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+            # Create service with longer timeout and better error handling
+            service = webdriver.ChromeService(
+                log_path=os.devnull,  # Suppress logs
+            )
+
+            driver = webdriver.Chrome(service=service, options=options)
+            driver.set_page_load_timeout(60)  # Increased timeout to 60 seconds
+            driver.set_script_timeout(60)
+            driver.implicitly_wait(10)  # Implicit wait for elements
+
             # Test with a simple page load first
-            driver.get("about:blank")
-            
-            # Now navigate to the requested URL
-            driver.get(url)
+            try:
+                driver.get("about:blank")
+            except Exception as e:
+                driver.quit()
+                raise Exception(f"Failed to initialize Chrome: {e}")
+
+            # Now navigate to the requested URL with better error handling
+            try:
+                driver.get(url)
+                # Wait for page to be ready
+                WebDriverWait(driver, 30).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+            except TimeoutException:
+                # If page times out, still keep the browser for potential interaction
+                print(f"Warning: Page load timed out for {url}, but browser is ready for interaction")
+            except Exception as e:
+                driver.quit()
+                raise Exception(f"Failed to navigate to {url}: {e}")
+
             browsers[browser_id] = driver
             return f"Browser opened with ID: {browser_id}. Navigated to {url}. You can now read its content or interact with it."
             
@@ -337,12 +381,42 @@ def close_browser(browser_id: str) -> str:
         return f"Browser with ID '{browser_id}' not found or already closed."
     try:
         driver = browsers.pop(browser_id)
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception as quit_error:
+            print(f"Warning: Error during driver quit for {browser_id}: {quit_error}")
+            try:
+                # Force close if regular quit fails
+                driver.service.stop()
+            except:
+                pass
         return f"Browser {browser_id} closed successfully."
     except Exception as e:
         if browser_id in browsers:
             browsers.pop(browser_id)
         raise Exception(f"Failed to close browser {browser_id}: {e}")
+
+def cleanup_all_browsers():
+    """Clean up all browser instances - useful for startup and error recovery."""
+    browsers_to_close = list(browsers.keys())
+    closed_count = 0
+
+    for browser_id in browsers_to_close:
+        try:
+            close_browser(browser_id)
+            closed_count += 1
+        except Exception as e:
+            print(f"Warning: Failed to cleanup browser {browser_id}: {e}")
+            # Remove from dict even if cleanup fails
+            browsers.pop(browser_id, None)
+
+    if closed_count > 0:
+        print(f"Cleaned up {closed_count} browser instances")
+    return closed_count
+
+def get_browser_count() -> int:
+    """Get the current number of active browsers."""
+    return len(browsers)
 
 
 def fill_multiple_fields(browser_id: str, fields: list) -> str:

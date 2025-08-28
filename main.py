@@ -6,9 +6,11 @@ load_dotenv()
 
 # Apply memory optimizations early before importing heavy modules
 from core.memory_optimization import apply_memory_optimizations
-from core.memory_monitor import start_memory_monitoring, get_memory_stats
 from core.memory_efficient_cache import get_data_manager, get_cache_stats, optimize_memory
 apply_memory_optimizations()
+
+# Memory monitoring disabled as requested - use as much memory as needed
+# from core.memory_monitor import start_memory_monitoring, get_memory_stats
 
 from core.config import settings
 from core.structured_logging import structured_logger, LogContext, operation_context
@@ -67,6 +69,9 @@ import json
 import re
 import asyncio
 import contextlib
+
+# Clean up any lingering browser instances on startup
+browsing.cleanup_all_browsers()
 
 MEMORY_FILE = "./agent_memory.json"
 
@@ -155,7 +160,8 @@ async def lifespan(app: FastAPI):
             logging.info("Agent memory loading disabled via NO_MEMORY environment variable")
         
         # Start memory monitoring for 512MB limit
-        start_memory_monitoring()
+        # Memory monitoring disabled
+        # start_memory_monitoring()
         logging.info("Memory monitoring started for 512MB limit")
         
         app.state.running = True
@@ -676,6 +682,37 @@ def feedback(feedback_req: schemas.FeedbackRequest, user: schemas.User = Depends
 
     return {"status": "success", "message": "Thank you for the feedback! I've recorded it to improve my future performance."}
 
+@app.post('/browsers/cleanup')
+def cleanup_browsers():
+    """Force cleanup of all browser instances."""
+    try:
+        closed_count = browsing.cleanup_all_browsers()
+        return {
+            "status": "success",
+            "message": f"Cleaned up {closed_count} browser instances",
+            "active_browsers": browsing.get_browser_count()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to cleanup browsers: {str(e)}"
+        }
+
+@app.get('/browsers/status')
+def get_browser_status():
+    """Get current browser status."""
+    try:
+        return {
+            "status": "success",
+            "active_browsers": browsing.get_browser_count(),
+            "browser_ids": list(browsing.browsers.keys())
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to get browser status: {str(e)}"
+        }
+
 @app.get('/healthz')
 def healthz():
     try:
@@ -684,15 +721,15 @@ def healthz():
             name: str(cb.state) for name, cb in circuit_breaker_manager.circuit_breakers.items()
         }
         
-        # Get memory statistics
-        memory_stats = get_memory_stats()
-        
+        # Memory monitoring disabled
+        # memory_stats = get_memory_stats()
+
         return {
             "status": "ok",
             "timestamp": datetime.now().isoformat(),
             "circuit_breakers": circuit_breaker_status,
             "performance_monitoring": getattr(settings, 'ENABLE_PERFORMANCE_MONITORING', False),
-            "memory": memory_stats
+            "memory": {"monitoring_disabled": True, "unlimited_memory": True}
         }
     except Exception as e:
         logging.error(f"Health check failed: {str(e)}")
@@ -704,16 +741,20 @@ def healthz():
 
 @app.get('/memory/stats')
 def get_memory_statistics():
-    """Get detailed memory usage statistics and monitoring data."""
+    """Get memory usage statistics (disabled for unlimited memory usage)."""
     try:
-        memory_stats = get_memory_stats()
+        # Memory monitoring disabled - unlimited memory usage
         cache_stats = get_cache_stats()
-        
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
             "data": {
-                "memory": memory_stats,
+                "memory": {
+                    "monitoring_disabled": True,
+                    "unlimited_memory": True,
+                    "message": "Memory monitoring disabled as requested"
+                },
                 "caches": cache_stats
             }
         }
