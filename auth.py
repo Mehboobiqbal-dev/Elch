@@ -18,7 +18,12 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception as e:
+            # Suppress DB close/rollback exceptions (e.g., aborted connections) to avoid cascading 500s
+            import logging
+            logging.error(f"DB session close failed: {e}")
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
     """

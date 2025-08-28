@@ -1,0 +1,784 @@
+{
+  "info": {
+    "name": "Elch Agent API",
+    "description": "Complete API collection for Elch Agent - AI-powered automation and question answering",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "elch-agent"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "User Signup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"username\": \"testuser\",\n  \"password\": \"securepassword123\",\n  \"is_active\": true,\n  \"is_superuser\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/signup",
+              "host": ["{{base_url}}"],
+              "path": ["signup"]
+            },
+            "description": "Create a new user account"
+          }
+        },
+        {
+          "name": "User Login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "username",
+                  "value": "testuser",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "securepassword123",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/token",
+              "host": ["{{base_url}}"],
+              "path": ["token"]
+            },
+            "description": "Authenticate user and get access token",
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "if (pm.response.code === 200) {",
+                    "    const response = pm.response.json();",
+                    "    pm.collectionVariables.set('auth_token', response.access_token);",
+                    "    pm.collectionVariables.set('user_id', response.user.id);",
+                    "    console.log('Token saved:', response.access_token.substring(0, 20) + '...');",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/me",
+              "host": ["{{base_url}}"],
+              "path": ["me"]
+            },
+            "description": "Get current authenticated user information"
+          }
+        },
+        {
+          "name": "OAuth Google Login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/login/google",
+              "host": ["{{base_url}}"],
+              "path": ["login", "google"]
+            },
+            "description": "Initiate Google OAuth login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AI Agent",
+      "item": [
+        {
+          "name": "Ask Agent (General Question)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_input\": \"What is the capital of France?\",\n  \"run_id\": \"run_{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/agent/run",
+              "host": ["{{base_url}}"],
+              "path": ["agent", "run"]
+            },
+            "description": "Ask the agent a general question (automatically classified)"
+          }
+        },
+        {
+          "name": "Ask Agent (Task)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_input\": \"Search for hotels in Paris and book one for next week\",\n  \"run_id\": \"run_{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/agent/run",
+              "host": ["{{base_url}}"],
+              "path": ["agent", "run"]
+            },
+            "description": "Ask the agent to perform a task (automatically classified)"
+          }
+        },
+        {
+          "name": "Send Prompt (Legacy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Explain how solar panels work\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/prompt",
+              "host": ["{{base_url}}"],
+              "path": ["prompt"]
+            },
+            "description": "Send a prompt to the agent (legacy endpoint)"
+          }
+        },
+        {
+          "name": "Enhanced Assistant Prompt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Book a flight from New York to London\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/assistant/prompt",
+              "host": ["{{base_url}}"],
+              "path": ["assistant", "prompt"]
+            },
+            "description": "Use the enhanced assistant with advanced features"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Task Management",
+      "item": [
+        {
+          "name": "Get Task Results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tasks/results?limit=10&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tasks", "results"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get paginated list of task results"
+          }
+        },
+        {
+          "name": "Get Task Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tasks/statistics?days=30",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tasks", "statistics"],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "Get task execution statistics"
+          }
+        },
+        {
+          "name": "Download Task Result",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tasks/1/download?format=json",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tasks", "1", "download"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Download a specific task result (replace 1 with actual task ID)"
+          }
+        },
+        {
+          "name": "Delete Task",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tasks/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tasks", "1"]
+            },
+            "description": "Delete a task result (replace 1 with actual task ID)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat System",
+      "item": [
+        {
+          "name": "Get Chat History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/chat/history",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "history"]
+            },
+            "description": "Get chat message history"
+          }
+        },
+        {
+          "name": "Send Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello, can you help me with a task?\",\n  \"message_type\": \"text\",\n  \"agent_run_id\": \"run_{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "message"]
+            },
+            "description": "Send a chat message to the agent"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Web Scraping",
+      "item": [
+        {
+          "name": "Scrape Website",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com\",\n  \"selectors\": {\n    \"title\": \"h1\",\n    \"content\": \".main-content\"\n  },\n  \"wait_time\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/scrape",
+              "host": ["{{base_url}}"],
+              "path": ["scrape"]
+            },
+            "description": "Scrape content from a website"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Form Automation",
+      "item": [
+        {
+          "name": "Automate Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"browser_id\": \"browser_123\",\n  \"url\": \"https://example.com/login\",\n  \"username_selector\": \"#username\",\n  \"username\": \"testuser\",\n  \"password_selector\": \"#password\",\n  \"password\": \"testpass\",\n  \"submit_selector\": \"button[type='submit']\",\n  \"success_indicator\": \"Welcome\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/automate_login",
+              "host": ["{{base_url}}"],
+              "path": ["form", "automate_login"]
+            },
+            "description": "Automate login process on a website"
+          }
+        },
+        {
+          "name": "Automate Registration",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/register\",\n  \"form_data\": {\n    \"username\": \"newuser\",\n    \"email\": \"user@example.com\",\n    \"password\": \"secure123\"\n  },\n  \"browser_id\": \"browser_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/automate_registration",
+              "host": ["{{base_url}}"],
+              "path": ["form", "automate_registration"]
+            },
+            "description": "Automate user registration on a website"
+          }
+        },
+        {
+          "name": "Apply for Job (Upwork)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_url\": \"https://www.upwork.com/job/job-details\",\n  \"proposal_text\": \"I am excited to work on this project...\",\n  \"rate\": 50,\n  \"browser_id\": \"browser_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/apply_job_upwork",
+              "host": ["{{base_url}}"],
+              "path": ["form", "apply_job_upwork"]
+            },
+            "description": "Apply for a job on Upwork"
+          }
+        },
+        {
+          "name": "Apply for Job (Fiverr)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_url\": \"https://www.fiverr.com/gigs/job\",\n  \"proposal_text\": \"I can deliver high-quality work...\",\n  \"price\": 100,\n  \"browser_id\": \"browser_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/apply_job_fiverr",
+              "host": ["{{base_url}}"],
+              "path": ["form", "apply_job_fiverr"]
+            },
+            "description": "Apply for a job on Fiverr"
+          }
+        },
+        {
+          "name": "Apply for Job (LinkedIn)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_url\": \"https://www.linkedin.com/jobs/view/job-id\",\n  \"cover_letter\": \"I am interested in this position...\",\n  \"browser_id\": \"browser_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/apply_job_linkedin",
+              "host": ["{{base_url}}"],
+              "path": ["form", "apply_job_linkedin"]
+            },
+            "description": "Apply for a job on LinkedIn"
+          }
+        },
+        {
+          "name": "Batch Job Applications",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jobs\": [\n    {\n      \"platform\": \"upwork\",\n      \"url\": \"https://www.upwork.com/job/job1\",\n      \"proposal\": \"Proposal text for job 1...\"\n    },\n    {\n      \"platform\": \"fiverr\",\n      \"url\": \"https://www.fiverr.com/gigs/job2\",\n      \"proposal\": \"Proposal text for job 2...\"\n    }\n  ],\n  \"browser_id\": \"browser_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/form/batch_apply_jobs",
+              "host": ["{{base_url}}"],
+              "path": ["form", "batch_apply_jobs"]
+            },
+            "description": "Apply to multiple jobs at once"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tool Execution",
+      "item": [
+        {
+          "name": "Execute Tool",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tool_name\": \"open_browser\",\n  \"params\": {\n    \"url\": \"https://example.com\",\n    \"max_retries\": 3\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/call_tool",
+              "host": ["{{base_url}}"],
+              "path": ["call_tool"]
+            },
+            "description": "Execute a specific automation tool"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cloud Credentials",
+      "item": [
+        {
+          "name": "Get Cloud Credentials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/credentials",
+              "host": ["{{base_url}}"],
+              "path": ["credentials"]
+            },
+            "description": "Get all cloud credentials for current user"
+          }
+        },
+        {
+          "name": "Create Cloud Credentials",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"aws\",\n  \"access_key\": \"AKIA...\",\n  \"secret_key\": \"secret...\",\n  \"region\": \"us-east-1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/credentials",
+              "host": ["{{base_url}}"],
+              "path": ["credentials"]
+            },
+            "description": "Create new cloud credentials"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plan Execution",
+      "item": [
+        {
+          "name": "Execute Plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": [\n    {\n      \"action\": \"open_browser\",\n      \"params\": {\n        \"url\": \"https://example.com\"\n      }\n    },\n    {\n      \"action\": \"fill_form\",\n      \"params\": {\n        \"browser_id\": \"browser_123\",\n        \"selector\": \"#search\",\n        \"value\": \"search term\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute_plan",
+              "host": ["{{base_url}}"],
+              "path": ["execute_plan"]
+            },
+            "description": "Execute a predefined plan"
+          }
+        },
+        {
+          "name": "Submit Feedback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan_id\": 123,\n  \"rating\": 5,\n  \"comment\": \"Excellent execution!\",\n  \"improvements\": [\"Could be faster\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["feedback"]
+            },
+            "description": "Submit feedback on plan execution"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health & Monitoring",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthz",
+              "host": ["{{base_url}}"],
+              "path": ["healthz"]
+            },
+            "description": "Check API health status"
+          }
+        },
+        {
+          "name": "Memory Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/memory/stats",
+              "host": ["{{base_url}}"],
+              "path": ["memory", "stats"]
+            },
+            "description": "Get memory usage statistics"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  }
+}

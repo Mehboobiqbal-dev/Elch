@@ -18,4 +18,7 @@ def extract_intents(prompt: str) -> List[Dict[str, Any]]:
         return parse_json_tolerant(response_text)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Intent extraction failed: {e}")
+        # Graceful fallback: return no intents to allow downstream deterministic planning or a neutral response
+        import logging
+        logging.warning(f"Intent extraction failed, returning empty intents. Error: {e}")
+        return []

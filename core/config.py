@@ -48,17 +48,30 @@ class Settings(BaseSettings):
     LLM_API_KEY: Optional[str] = os.environ.get("LLM_API_KEY", "")
     LLM_MODEL_NAME: str = os.environ.get("LLM_MODEL_NAME", "deprecated")
     
-    # Gemini settings (for backward compatibility)
+    # Gemini settings (for backward compatibility) and Vertex AI GenAI
     GEMINI_API_KEYS: str = os.environ.get("GEMINI_API_KEYS", "")
     GEMINI_API_KEYS_LIST: List[str] = [k.strip() for k in GEMINI_API_KEYS.split(",") if k.strip()]
     GEMINI_API_KEY: Optional[str] = os.environ.get("GEMINI_API_KEY", "")
     GEMINI_MODEL_NAME: str = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-pro")
+
+    # Vertex AI GenAI (google-genai) settings
+    USE_VERTEX_GENAI: bool = os.environ.get("USE_VERTEX_GENAI", "false").lower() == "true"
+    GOOGLE_CLOUD_PROJECT: Optional[str] = os.environ.get("GOOGLE_CLOUD_PROJECT", None)
+    GOOGLE_CLOUD_LOCATION: str = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+    VERTEX_GENAI_MODEL: str = os.environ.get("VERTEX_GENAI_MODEL", "gemini-2.0-flash-001")
+    VERTEX_TEMPERATURE: float = float(os.environ.get("VERTEX_TEMPERATURE", 1.0))
+    VERTEX_TOP_P: float = float(os.environ.get("VERTEX_TOP_P", 0.95))
+    VERTEX_MAX_OUTPUT_TOKENS: int = int(os.environ.get("VERTEX_MAX_OUTPUT_TOKENS", 8192))
     
     # Auto content generation settings
     ENABLE_AUTO_CONTENT: bool = os.environ.get("ENABLE_AUTO_CONTENT", "True").lower() == "true"
     AUTO_CONTENT_INTERVAL_MINUTES: int = int(os.environ.get("AUTO_CONTENT_INTERVAL_MINUTES", 360))
     AUTO_CONTENT_TOPICS: str = os.environ.get("AUTO_CONTENT_TOPICS", "python,data structures,algorithms,system design,cloud computing,devops,ai ml")
     AUTO_CONTENT_GENERATE_EXAMS: bool = os.environ.get("AUTO_CONTENT_GENERATE_EXAMS", "True").lower() == "true"
+    
+    # OpenAI fallback settings
+    OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+    OPENAI_MODEL_NAME: str = os.environ.get("OPENAI_MODEL_NAME", "gpt-3.5-turbo")
     
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 60))

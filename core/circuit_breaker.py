@@ -6,6 +6,8 @@ by temporarily disabling operations that are likely to fail.
 
 import time
 import threading
+import inspect
+from functools import wraps
 from typing import Any, Callable, Dict, Optional, Type
 from enum import Enum
 from dataclasses import dataclass
@@ -46,9 +48,17 @@ class CircuitBreaker:
         self.lock = threading.RLock()
         
     def __call__(self, func: Callable) -> Callable:
-        """Decorator to wrap functions with circuit breaker."""
+        """Decorator to wrap functions with circuit breaker.
+        Ensures FastAPI can introspect the original function signature.
+        """
+        @wraps(func)
         def wrapper(*args, **kwargs):
             return self.call(func, *args, **kwargs)
+        # Explicitly preserve the original signature for frameworks that rely on it
+        try:
+            wrapper.__signature__ = inspect.signature(func)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         return wrapper
     
     def call(self, func: Callable, *args, **kwargs) -> Any:

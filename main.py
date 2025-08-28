@@ -82,9 +82,18 @@ def load_agent_memory():
 
                 doc_count = 0
                 for i, doc in enumerate(documents):
+                    # Handle both dict and JSON string formats
+                    if isinstance(doc, str):
+                        try:
+                            doc = json.loads(doc)
+                        except json.JSONDecodeError:
+                            print(f"Warning: Skipping malformed document #{i} in agent memory: invalid JSON string.")
+                            continue
+
                     if not isinstance(doc, dict):
                         print(f"Warning: Skipping malformed document #{i} in agent memory: item is not a dictionary.")
                         continue
+
                     try:
                         memory.memory_instance.add_document(doc)
                         doc_count += 1
@@ -195,7 +204,11 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception as e:
+            import logging
+            logging.error(f"DB session close failed: {e}")
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -315,7 +328,8 @@ async def websocket_endpoint(websocket: WebSocket, user: schemas.User = Depends(
             # Keep the connection alive, or handle incoming messages if needed
             await websocket.receive_text() # This will block until a message is received or connection closes
     except WebSocketDisconnect:
-        del active_connections[user_id]
+        if user_id in active_connections:
+            del active_connections[user_id]
         print(f"Client {user_id} disconnected")
     except Exception as e:
         if user_id in active_connections:
@@ -332,10 +346,15 @@ app.include_router(tasks_router, dependencies=[Depends(get_current_user)])
 def me(user: schemas.User = Depends(get_current_user)):
     return user
 
-@app.get('/credentials', response_model=List[schemas.CloudCredential])
+@app.get('/credentials', response_model=List[dict])
 def get_credentials(user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     creds = db.query(CloudCredential).filter_by(user_id=user.id).all()
-    return creds
+    # Return a safe, minimal representation to avoid schema mismatches
+    return [{
+        "id": c.id,
+        "user_id": c.user_id,
+        "provider": c.provider
+    } for c in creds]
 
 @app.post('/credentials', response_model=schemas.CloudCredential)
 def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -354,7 +373,34 @@ def save_credentials(cred_data: schemas.CloudCredentialCreate, user: schemas.Use
     log_audit(db, user.id, f'update_{cred_data.provider}_credentials', 'Credentials updated')
     return cred
 
-limiter = Limiter(key_func=get_remote_address)
+def rate_limit_key(request: Request) -> str:
+    try:
+        # Prefer Authorization header
+        auth_header = request.headers.get("Authorization")
+        token = None
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+        # Fallback to cookie set by /auth flow
+        if token is None:
+            cookie_val = request.cookies.get("access_token")
+            if cookie_val:
+                if cookie_val.startswith("Bearer "):
+                    token = cookie_val.split(" ", 1)[1]
+                else:
+                    token = cookie_val
+        if token:
+            payload = jwt.decode(token, settings.SESSION_SECRET, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("user_id")
+            if user_id is not None:
+                return f"user:{user_id}"
+    except Exception:
+        # Any error decoding token -> fallback to IP address
+        pass
+    return f"ip:{get_remote_address(request)}"
+
+limiter = Limiter(key_func=rate_limit_key)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -805,7 +851,7 @@ def generate_text(prompt: str) -> str:
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {str(e)}")
 
 @app.post('/agent/run', response_model=schemas.AgentRunResponse, tags=["Agent"])
-@limiter.limit("5/minute")
+@limiter.limit(f"{getattr(settings, 'RATE_LIMIT_PER_MINUTE', 60)}/minute")
 async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user: schemas.User = Depends(get_current_user), db: Session = Depends(get_db)):
     core.log_action('agent_run', {'user_input': agent_req.user_input})
     user_id = user.id
@@ -864,6 +910,103 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
             history = []
 
         await send_log(f"Agent run started for goal: {goal} (run_id={run_id}, resumed_steps={session_obj.current_step})")
+
+        # Check if this is a general question that can be answered directly
+        def classify_question_type(question: str) -> str:
+            """Classify if a question is general knowledge or requires specific tools/browser actions."""
+            classification_prompt = f"""
+            Classify the following user input as either 'general' or 'task':
+
+            - 'general': Questions about facts, explanations, advice, opinions, or general knowledge that can be answered directly with information
+            - 'task': Requests that require performing actions like browsing websites, filling forms, making purchases, interacting with web applications, or any automated task
+
+            Examples:
+            - "What is the capital of France?" → general
+            - "Explain quantum physics" → general
+            - "What's the weather today?" → general
+            - "Book a flight to Paris" → task
+            - "Search for hotels in London" → task
+            - "Fill out this form" → task
+            - "Order pizza online" → task
+
+            User input: "{question}"
+
+            Respond with only 'general' or 'task':
+            """
+
+            try:
+                response = generate_text(classification_prompt).strip().lower()
+                if 'general' in response:
+                    return 'general'
+                elif 'task' in response:
+                    return 'task'
+                else:
+                    return 'task'
+            except Exception as e:
+                logging.warning(f"Question classification failed: {e}, defaulting to task")
+                return 'task'
+
+        def answer_general_question(question: str, context: str = "") -> str:
+            """Answer general questions using Gemini API with optional context."""
+            if context:
+                prompt = f"""
+                Answer the following question based on the provided context and your general knowledge.
+                If the context is relevant, use it to inform your answer. If not, answer based on your general knowledge.
+
+                Context: {context}
+
+                Question: {question}
+
+                Provide a comprehensive but concise answer:
+                """
+            else:
+                prompt = f"""
+                Answer the following question based on your general knowledge:
+
+                Question: {question}
+
+                Provide a comprehensive but concise answer:
+                """
+
+            try:
+                return generate_text(prompt)
+            except Exception as e:
+                logging.error(f"Failed to generate answer for general question: {e}")
+                return "I'm sorry, I encountered an error while trying to answer your question. Please try again."
+
+        # Check if this is a general question
+        if goal:
+            question_type = classify_question_type(goal)
+            if question_type == 'general':
+                await send_log(f"Classified as general question: {goal}")
+
+                # Get relevant context from memory if available
+                context_str = ""
+                if 'relevant_context' in locals() and relevant_context:
+                    context_docs = [doc for _, doc in relevant_context]
+                    context_str = "\n".join([json.dumps(doc) for doc in context_docs])
+
+                answer = answer_general_question(goal, context_str)
+
+                # Save the result to history
+                history.append({
+                    "step": len(history) + 1,
+                    "action": {"name": "answer_general_question", "params": {"question": goal}},
+                    "result": answer,
+                    "thought": f"Answered general question: {goal}"
+                })
+
+                # Update session
+                session_obj.status = 'completed'
+                session_obj.history = json.dumps(history)
+                db.commit()
+
+                return schemas.AgentRunResponse(
+                    status="success",
+                    message="Answered general question using AI knowledge.",
+                    history=history,
+                    final_result=answer
+                )
 
         # Helper: infer latest browser_id from history or currently open browsers
         def infer_browser_id_from_history(hist: List[Dict[str, Any]]) -> str:
@@ -948,13 +1091,19 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                 action_data = decision_data.get("action", {})
                 action_name = action_data.get("name")
                 action_params = action_data.get("params", {})
-            except (json.JSONDecodeError, AttributeError, ValueError) as e:
-                logging.error(f"Failed to parse agent decision from response: '{response_text}'. Error: {e}", exc_info=True)
-                # Mark session as failed for this attempt, but keep history
+            except Exception as e:
+                # Catch any LLM or parsing error and return a structured error instead of crashing the loop
+                safe_resp = (response_text[:500] if 'response_text' in locals() and isinstance(response_text, str) else "<no response>")
+                logging.error(f"Agent loop failed to obtain/parse LLM response. Error: {e}. Raw: {safe_resp}", exc_info=True)
                 session_obj.status = 'failed'
                 session_obj.history = json.dumps(history)
                 db.commit()
-                return schemas.AgentRunResponse(status="error", message=f"Agent failed to parse LLM response: '{response_text}'. Last thought was: {thought}", history=history, final_result=None)
+                return schemas.AgentRunResponse(
+                    status="error",
+                    message=f"Agent failed to obtain/parse LLM response on loop {step_offset + i + 1}. Error: {e}. Raw: {safe_resp[:200]}",
+                    history=history,
+                    final_result=None
+                )
 
             if not action_name or not isinstance(action_params, dict):
                 session_obj.status = 'failed'
@@ -1080,6 +1229,26 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
             session_obj.history = json.dumps(history)
             session_obj.status = 'running'
             db.commit()
+
+            # If we just scraped, finalize immediately to avoid extra LLM calls and memory churn
+            if action_name == "scrape_website_comprehensive":
+                await send_log(f"Agent finished goal via scraping: '{goal}'")
+                formatted_response = ResponseFormatter.format_agent_response(
+                    status="success",
+                    message="Agent completed the goal successfully (scraping).",
+                    history=history,
+                    final_result=result,
+                    goal=goal,
+                    current_step=step_number
+                )
+                await send_log(json.dumps({
+                    "topic": "agent_updates",
+                    "payload": {"status": "complete", "data": {"final_result": result, "formatted_response": formatted_response}}
+                }))
+                session_obj.status = 'completed'
+                session_obj.history = json.dumps(history)
+                db.commit()
+                return schemas.AgentRunResponse(status="success", message=formatted_response['content'], history=history, final_result=result)
 
             # Self-Critique
             critique_prompt = f"Goal: {goal}\nLast Action Result: {result}\nCritique and suggest improvement."

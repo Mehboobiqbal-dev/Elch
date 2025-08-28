@@ -49,7 +49,13 @@ def run_agent_loop(goal: str, max_loops: int = 30) -> Dict:
     history = []
     consecutive_failures = 0
     max_consecutive_failures = getattr(settings, 'MAX_CONSECUTIVE_FAILURES', 3)
-    
+
+    # Identify scrape goals for graceful fallback planning
+    import re
+    goal_lower = (goal or "").lower()
+    url_match = re.search(r"https?://[^\s]+", goal or "")
+    is_scrape_goal = bool(url_match and any(k in goal_lower for k in ["scrape", "scrap", "extract"]))
+
     context = LogContext(metadata={'goal': goal, 'max_loops': max_loops})
     
     with operation_context('agent_loop', context):
@@ -82,6 +88,19 @@ def run_agent_loop(goal: str, max_loops: int = 30) -> Dict:
                         {"error": str(e), "attempt": decision_attempt + 1}
                     )
                     if decision_attempt == 2:  # Last attempt
+                        # If this is a scrape goal, synthesize a safe default decision to proceed
+                        if is_scrape_goal and url_match:
+                            decision_data = {
+                                "thought": "LLM planning unavailable. Proceeding with robust scraping using default parameters.",
+                                "action": {
+                                    "name": "scrape_website_comprehensive",
+                                    "params": {
+                                        "url": url_match.group(0),
+                                        "scrape_type": "all"
+                                    }
+                                }
+                            }
+                            break
                         return {"status": "error", "message": f"Failed to parse agent decision after 3 attempts: {e}", "history": history, "final_result": None}
                     time.sleep(1)  # Brief pause before retry
             
@@ -127,6 +146,21 @@ def run_agent_loop(goal: str, max_loops: int = 30) -> Dict:
                         )
                 else:
                     consecutive_failures = 0  # Reset on success
+
+                # If this is a scrape goal and we just scraped, declare success immediately
+                if is_scrape_goal and action_name == "scrape_website_comprehensive":
+                    structured_logger.log_agent_action(
+                        "Scrape goal achieved; finishing task",
+                        context,
+                        {"url": action_params.get("url", ""), "auto_finish": True}
+                    )
+                    history.append({
+                        "step": i + 1,
+                        "thought": thought,
+                        "action": action_data,
+                        "result": str(result)
+                    })
+                    return {"status": "success", "message": "Agent completed the goal.", "history": history, "final_result": result}
             
             # Log the step execution
             structured_logger.log_agent_action(

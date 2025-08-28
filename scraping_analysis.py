@@ -18,7 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from task_data_manager import task_manager
 
-def scrape_website_comprehensive(url: str, scrape_type: str = 'all', max_depth: int = 1, browser_id: str = None) -> str:
+def scrape_website_comprehensive(url: str, scrape_type: str = 'all', max_depth: int = 1, browser_id: str = None, target_elements: 'Optional[List[Dict[str, Any]]]' = None) -> str:
     """Comprehensive website scraping with intelligent data extraction.
     
     Args:
@@ -183,34 +183,100 @@ def scrape_website_comprehensive(url: str, scrape_type: str = 'all', max_depth: 
         }
     
     try:
-        # Open browser and navigate to URL
+        content = None
+        used_browser_id = None
+        # Try browser first
         if not browser_id:
-            browser_result = open_browser(url)
-            # Extract browser ID
-            if "browser_" in browser_result:
-                browser_id = browser_result.split("browser_")[1].split(".")[0]
-                browser_id = f"browser_{browser_id}"
-            else:
+            try:
+                browser_result = open_browser(url)
+                if "browser_" in browser_result:
+                    used_browser_id = browser_result.split("browser_")[1].split(".")[0]
+                    used_browser_id = f"browser_{used_browser_id}"
+                else:
+                    used_browser_id = None
+            except Exception:
+                used_browser_id = None
+        else:
+            used_browser_id = browser_id
+
+        if used_browser_id:
+            # Assist dynamic content: wait, scroll, and wait for DOM to stabilize
+            try:
+                from browsing import browsers as _browsers
+                driver = _browsers.get(used_browser_id)
+                if driver:
+                    # Initial short wait
+                    time.sleep(2)
+                    # Scroll to bottom a few times to trigger lazy loads
+                    for _ in range(3):
+                        try:
+                            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                            time.sleep(0.8)
+                        except Exception:
+                            break
+                    # Wait for DOM size to stabilize
+                    try:
+                        last_size = 0
+                        stable = 0
+                        for _ in range(10):
+                            size = driver.execute_script("return document.body ? document.body.innerHTML.length : 0;")
+                            if size == last_size:
+                                stable += 1
+                                if stable >= 2:
+                                    break
+                            else:
+                                stable = 0
+                                last_size = size
+                            time.sleep(0.5)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Now get content
+            content = get_page_content(used_browser_id)
+            # If content looks too small, try HTTP fallback too
+            if not content or len(content) < 1000:
+                try:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9,ur;q=0.8",
+                        "Referer": url
+                    }
+                    resp = requests.get(url, headers=headers, timeout=20)
+                    resp.raise_for_status()
+                    # Prefer richer content between browser and HTTP
+                    content = resp.text if len(resp.text) > len(content or "") else content
+                except Exception:
+                    pass
+        else:
+            # Fallback to requests if browser is unavailable
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9,ur;q=0.8",
+                    "Referer": url
+                }
+                resp = requests.get(url, headers=headers, timeout=20)
+                resp.raise_for_status()
+                content = resp.text
+            except Exception as req_err:
                 return json.dumps({
                     "success": False,
-                    "error": "Failed to open browser",
+                    "error": f"Failed to retrieve page content: {req_err}",
                     "url": url
                 }, indent=2)
-        
-        # Wait for page to load
-        time.sleep(3)
-        
-        # Get page content
-        content = get_page_content(browser_id)
-        
+
         if not content:
-            close_browser(browser_id)
+            if used_browser_id:
+                close_browser(used_browser_id)
             return json.dumps({
                 "success": False,
                 "error": "Failed to get page content",
                 "url": url
             }, indent=2)
-        
+
         # Parse with BeautifulSoup
         soup = BeautifulSoup(content, 'html.parser')
         
@@ -264,7 +330,7 @@ def scrape_website_comprehensive(url: str, scrape_type: str = 'all', max_depth: 
                 metadata={
                     'scrape_type': scrape_type,
                     'max_depth': max_depth,
-                    'browser_used': browser_id,
+                    'browser_used': used_browser_id or 'requests_fallback',
                     'statistics': result.get('statistics', {})
                 }
             )
@@ -281,16 +347,20 @@ def scrape_website_comprehensive(url: str, scrape_type: str = 'all', max_depth: 
             result['save_error'] = str(save_error)
             result['saved_to_database'] = False
         
-        # Close browser
-        close_browser(browser_id)
+        # Close browser if used
+        if used_browser_id:
+            try:
+                close_browser(used_browser_id)
+            except Exception:
+                pass
         
         return json.dumps(result, indent=2, ensure_ascii=False)
         
     except Exception as e:
-        if browser_id:
+        if 'used_browser_id' in locals() and used_browser_id:
             try:
-                close_browser(browser_id)
-            except:
+                close_browser(used_browser_id)
+            except Exception:
                 pass
         
         return json.dumps({

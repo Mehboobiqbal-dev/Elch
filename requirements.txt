@@ -8,7 +8,7 @@ authlib
 passlib[bcrypt]
 python-jose[cryptography]
 cryptography
-bcrypt==3.2.2
+bcrypt==4.0.1
 slowapi
 GitPython
 
@@ -32,6 +32,7 @@ pydantic-settings
 
 # AI and ML services
 google-generativeai
+google-genai
 google-auth
 google-search-results
 openai
