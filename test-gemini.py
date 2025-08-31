@@ -3,7 +3,7 @@ import sys
 import time
 import json
 import argparse
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 import requests
 
@@ -25,7 +25,7 @@ GEN_REST_URL_TMPL = "https://generativelanguage.googleapis.com/v1beta/models/{mo
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 
 
-def parse_keys(keys_arg: str | None) -> List[str]:
+def parse_keys(keys_arg: Optional[str]) -> List[str]:
     if keys_arg:
         return [k.strip() for k in keys_arg.split(",") if k.strip()]
     env_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEYS_LIST")
