@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     ALLOWED_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     ALLOWED_HEADERS: List[str] = ["*"]
     
-    # Database settings
-    DATABASE_URL: str = os.environ.get("DATABASE_URL", f"sqlite:///{_project_root}/backend/database.db")
+    # Database settings (default to database.db in this repo root)
+    DATABASE_URL: str = os.environ.get("DATABASE_URL", f"sqlite:///{_project_root}/database.db")
     
     # Security settings
     SESSION_SECRET: str = os.environ.get("SESSION_SECRET", "your-secret-key-change-in-production")
