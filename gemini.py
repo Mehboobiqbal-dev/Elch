@@ -48,6 +48,8 @@ class APIKeyManager:
         self.api_keys = []
         self.key_usage = {}
         self.key_failures = {}
+        self.daily_usage = {}  # Track daily usage per key
+        self.daily_reset_time = {}  # Track when daily count was last reset
         self.last_rotation = time.time()
         self._load_api_keys()
     
@@ -64,9 +66,12 @@ class APIKeyManager:
             logging.info(f"Added single GEMINI_API_KEY as backup")
         
         # Initialize usage tracking
+        current_time = time.time()
         for key in self.api_keys:
             self.key_usage[key] = 0
             self.key_failures[key] = 0
+            self.daily_usage[key] = 0
+            self.daily_reset_time[key] = current_time
     
     def get_best_key(self) -> Optional[str]:
         """Get the best available API key based on usage and failure history."""
@@ -81,10 +86,14 @@ class APIKeyManager:
             # Reset failure count if it's been more than 5 minutes
             if current_time - self.key_failures.get(f"{key}_last_failure", 0) > 300:
                 self.key_failures[key] = 0
-            
+
             # Skip keys with too many failures
             if self.key_failures.get(key, 0) < 3:
-                available_keys.append(key)
+                # Also skip keys that have reached daily limit
+                if not self.is_daily_limit_reached(key):
+                    available_keys.append(key)
+                else:
+                    logging.warning(f"Key ({key[:8]}...) has reached daily limit ({self.daily_usage.get(key, 0)}/45 requests)")
         
         if not available_keys:
             # If all keys have too many failures, reset and try again
@@ -95,16 +104,43 @@ class APIKeyManager:
         
         # Sort by usage (prefer less used keys)
         available_keys.sort(key=lambda k: self.key_usage.get(k, 0))
-        
-        # Add some randomness to prevent all requests going to the same key
+
+        # Be more conservative with key rotation
+        best_key = available_keys[0]
+        best_usage = self.key_usage.get(best_key, 0)
+
+        # If the best key has been used less than 5 times, prefer it heavily
+        # This prevents unnecessary key rotation and quota exhaustion
+        if best_usage < 5 and len(available_keys) > 1:
+            # 95% chance to stick with the least-used key
+            if random.random() < 0.95:
+                return best_key
+
+        # Otherwise, allow limited rotation but still prefer less-used keys
         if len(available_keys) > 1 and random.random() < 0.2:
-            available_keys = available_keys[1:] + available_keys[:1]
-        
-        return available_keys[0] if available_keys else None
-    
+            # Only rotate between the top 2 least-used keys
+            return random.choice(available_keys[:min(2, len(available_keys))])
+
+        return best_key
+
+    def is_daily_limit_reached(self, key: str, daily_limit: int = 45) -> bool:
+        """Check if the daily limit for a key has been reached."""
+        current_time = time.time()
+        last_reset = self.daily_reset_time.get(key, 0)
+
+        # Reset daily count if it's been more than 24 hours
+        if current_time - last_reset > 86400:  # 24 hours
+            self.daily_usage[key] = 0
+            self.daily_reset_time[key] = current_time
+            logging.info(f"Reset daily usage count for key ({key[:8]}...)")
+
+        current_usage = self.daily_usage.get(key, 0)
+        return current_usage >= daily_limit
+
     def mark_key_usage(self, key: str):
         """Mark a key as used."""
         self.key_usage[key] = self.key_usage.get(key, 0) + 1
+        self.daily_usage[key] = self.daily_usage.get(key, 0) + 1
     
     def mark_key_failure(self, key: str):
         """Mark a key as failed."""
@@ -135,21 +171,27 @@ def generate_text(prompt: str) -> str:
         key = api_key_manager.get_best_key()
         if not key:
             break
-        
+
         key_prefix = key[:10] if len(key) >= 10 else key[:6]
-        
+
+        # Check if this key has reached its daily limit before even trying
+        if api_key_manager.is_daily_limit_reached(key):
+            logging.warning(f"Key ({key_prefix}...) has reached daily limit, skipping")
+            api_key_manager.mark_key_failure(key)
+            continue
+
         try:
-            # Apply enhanced rate limiting per API key
+            # Apply conservative rate limiting per API key (5 requests per hour)
             key_id = f"gemini_{key_prefix}"
-            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=30, window_seconds=60)  # Reduced from 50
-            
+            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=5, window_seconds=3600)
+
             if remaining <= 0:
                 logging.warning(f"Rate limit reached for Gemini key ({key_prefix}...), skipping to next")
                 api_key_manager.mark_key_failure(key)
                 continue
                 
             # Wait if needed to avoid hitting rate limits
-            rate_limiter.wait_if_needed(key_id, max_requests=30, window_seconds=60)
+            rate_limiter.wait_if_needed(key_id, max_requests=5, window_seconds=3600)  # 5 requests per hour
             
             logging.info(f"Attempt {attempts}: Trying Gemini generation with key ({key_prefix}...) - {remaining} requests remaining")
             
@@ -244,21 +286,27 @@ def generate_text_with_image(prompt: str, image_path: str) -> str:
         key = api_key_manager.get_best_key()
         if not key:
             break
-        
+
         key_prefix = key[:10] if len(key) >= 10 else key[:6]
-        
+
+        # Check if this key has reached its daily limit before even trying
+        if api_key_manager.is_daily_limit_reached(key):
+            logging.warning(f"Key ({key_prefix}...) has reached daily limit, skipping")
+            api_key_manager.mark_key_failure(key)
+            continue
+
         try:
-            # Apply enhanced rate limiting per API key
+            # Apply conservative rate limiting per API key (3 requests per hour)
             key_id = f"gemini_vision_{key_prefix}"
-            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=20, window_seconds=60)  # Lower limit for vision
-            
+            remaining = rate_limiter.get_remaining_requests(key_id, max_requests=3, window_seconds=3600)
+
             if remaining <= 0:
                 logging.warning(f"Rate limit reached for Gemini vision key ({key_prefix}...), skipping to next")
                 api_key_manager.mark_key_failure(key)
                 continue
                 
             # Wait if needed to avoid hitting rate limits
-            rate_limiter.wait_if_needed(key_id, max_requests=20, window_seconds=60)
+            rate_limiter.wait_if_needed(key_id, max_requests=3, window_seconds=3600)  # 3 requests per hour
             
             logging.info(f"Attempt {attempts}: Trying Gemini vision generation with key ({key_prefix}...) - {remaining} requests remaining")
             

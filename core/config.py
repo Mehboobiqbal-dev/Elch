@@ -5,10 +5,11 @@ from typing import Optional, Dict, Any, List
 
 # Load environment variables from both project root and backend/.env
 _current_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.abspath(os.path.join(_current_dir, "..", ".."))
-# Load root .env first, then backend/.env to allow backend overrides without clobbering root
-load_dotenv(os.path.join(_project_root, ".env"))
-load_dotenv(os.path.join(_project_root, "backend", ".env"))
+_project_root = os.path.abspath(os.path.join(_current_dir, ".."))
+# Load .env from current directory first, then project root, then backend/.env
+load_dotenv(".env")  # Current directory
+load_dotenv(os.path.join(_project_root, ".env"))  # Project root
+load_dotenv(os.path.join(_project_root, "backend", ".env"))  # Backend directory
 
 class Settings(BaseSettings):
     # Application settings

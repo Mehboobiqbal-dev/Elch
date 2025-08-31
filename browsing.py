@@ -17,6 +17,12 @@ from core.config import settings
 
 browsers: Dict[str, WebDriver] = {}
 
+# Browser profiles for persistent sessions
+browser_profiles: Dict[str, Dict] = {}
+
+# Service login states
+service_login_states: Dict[str, Dict] = {}
+
 
 def search_web(query: str, engine: str = 'duckduckgo') -> str:
     """Searches the web for the given query using DuckDuckGo Instant Answer API or headless browser scraping.
@@ -417,6 +423,233 @@ def cleanup_all_browsers():
 def get_browser_count() -> int:
     """Get the current number of active browsers."""
     return len(browsers)
+
+def create_persistent_browser(profile_name: str = "default", user_data_dir: str = None) -> str:
+    """Create a browser with persistent profile for saved sessions."""
+    if not user_data_dir:
+        user_data_dir = f"./browser_profiles/{profile_name}"
+
+    browser_id = f"persistent_{profile_name}_{len(browsers)}"
+
+    try:
+        options = webdriver.ChromeOptions()
+
+        # Enhanced options for persistent sessions
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument("--disable-logging")
+        options.add_argument("--disable-login-animations")
+        options.add_argument("--disable-smooth-scrolling")
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-renderer-backgrounding")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
+        options.add_argument("--disable-web-security")
+        options.add_argument("--disable-features=VizDisplayCompositor")
+
+        # Fix for Windows Chrome DevToolsActivePort issues
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-plugins")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-default-apps")
+        options.add_argument("--disable-sync")
+        options.add_argument("--disable-translate")
+        options.add_argument("--hide-scrollbars")
+        options.add_argument("--metrics-recording-only")
+        options.add_argument("--mute-audio")
+        options.add_argument("--no-crash-upload")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--disable-ipc-flooding-protection")
+
+        # Keep browser window for user interaction if needed
+        # options.add_argument("--headless=new")  # Commented out for user interaction
+
+        options.add_argument("--window-size=1200,800")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+
+        options.add_experimental_option('useAutomationExtension', False)
+
+        # Add arguments to preserve login sessions
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_experimental_option("prefs", {
+            "profile.password_manager_enabled": True,
+            "credentials_enable_service": True,
+            "profile.cookie_controls_mode": 0
+        })
+
+        # Create Chrome service to handle process management better
+        from selenium.webdriver.chrome.service import Service
+        service = Service()
+        # Note: Service object doesn't have add_argument method, using options instead
+
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(60)
+        driver.set_script_timeout(60)
+        driver.implicitly_wait(10)
+
+        browsers[browser_id] = driver
+        browser_profiles[browser_id] = {
+            "profile_name": profile_name,
+            "user_data_dir": user_data_dir,
+            "created_at": datetime.now().isoformat(),
+            "services": {}
+        }
+
+        logging.info(f"Browser created successfully: {browser_id} with profile {profile_name}")
+        logging.info(f"Total browsers active: {len(browsers)}")
+
+        return f"Persistent browser created with ID: {browser_id}. Profile: {profile_name}"
+
+    except Exception as e:
+        return f"Failed to create persistent browser: {e}"
+
+def detect_service_from_url(url: str) -> str:
+    """Detect which service a URL belongs to."""
+    service_patterns = {
+        "gmail": ["mail.google.com", "gmail.com"],
+        "skype": ["skype.com", "web.skype.com"],
+        "outlook": ["outlook.com", "outlook.live.com", "hotmail.com"],
+        "slack": ["slack.com", "app.slack.com"],
+        "discord": ["discord.com", "discordapp.com"],
+        "whatsapp": ["web.whatsapp.com", "whatsapp.com"],
+        "telegram": ["web.telegram.org", "telegram.org"],
+        "facebook": ["facebook.com", "messenger.com"],
+        "twitter": ["twitter.com", "x.com"],
+        "linkedin": ["linkedin.com"],
+        "zoom": ["zoom.us"],
+        "teams": ["teams.microsoft.com"],
+        "meet": ["meet.google.com"]
+    }
+
+    for service, domains in service_patterns.items():
+        for domain in domains:
+            if domain in url.lower():
+                return service
+
+    return "unknown"
+
+def check_login_status(browser_id: str, service: str) -> Dict:
+    """Check if user is logged into a specific service."""
+    if browser_id not in browsers:
+        return {"logged_in": False, "error": "Browser not found"}
+
+    driver = browsers[browser_id]
+    current_url = driver.current_url
+
+    # Service-specific login detection
+    login_indicators = {
+        "gmail": {
+            "login_url": "https://accounts.google.com",
+            "logged_in_selectors": ["[data-testid='inbox']", ".gb_ua", "[role='banner']"],
+            "logout_selectors": ["[aria-label*='Google Account']"]
+        },
+        "skype": {
+            "login_url": "https://web.skype.com",
+            "logged_in_selectors": ["[data-text-as-pseudo-element='Skype']", ".swxFrame"],
+            "logout_selectors": [".logout", "[data-text-as-pseudo-element='Sign out']"]
+        },
+        "outlook": {
+            "login_url": "https://outlook.live.com",
+            "logged_in_selectors": ["[role='main']", ".ms-Nav", "#main"],
+            "logout_selectors": ["[aria-label*='Sign out']"]
+        }
+    }
+
+    if service not in login_indicators:
+        return {"logged_in": False, "service": service, "error": "Service not supported for login detection"}
+
+    indicators = login_indicators[service]
+
+    try:
+        # Check if we're on a login page
+        if any(login_domain in current_url for login_domain in indicators["login_url"]):
+            return {"logged_in": False, "service": service, "current_url": current_url}
+
+        # Check for logged-in indicators
+        for selector in indicators["logged_in_selectors"]:
+            try:
+                element = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                if element:
+                    return {
+                        "logged_in": True,
+                        "service": service,
+                        "current_url": current_url,
+                        "confidence": "high"
+                    }
+            except:
+                continue
+
+        # Check for logout options (indicates logged in)
+        for selector in indicators["logout_selectors"]:
+            try:
+                element = WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                if element:
+                    return {
+                        "logged_in": True,
+                        "service": service,
+                        "current_url": current_url,
+                        "confidence": "high"
+                    }
+            except:
+                continue
+
+        return {
+            "logged_in": False,
+            "service": service,
+            "current_url": current_url,
+            "confidence": "low"
+        }
+
+    except Exception as e:
+        return {
+            "logged_in": False,
+            "service": service,
+            "error": str(e),
+            "current_url": current_url
+        }
+
+def navigate_to_service(browser_id: str, service: str) -> str:
+    """Navigate to a specific service's main page."""
+    if browser_id not in browsers:
+        logging.error(f"Browser {browser_id} not found. Available browsers: {list(browsers.keys())}")
+        return f"Browser {browser_id} not found"
+
+    service_urls = {
+        "gmail": "https://mail.google.com",
+        "skype": "https://web.skype.com",
+        "outlook": "https://outlook.live.com",
+        "slack": "https://app.slack.com",
+        "discord": "https://discord.com/app",
+        "whatsapp": "https://web.whatsapp.com",
+        "telegram": "https://web.telegram.org",
+        "facebook": "https://www.facebook.com",
+        "twitter": "https://twitter.com",
+        "linkedin": "https://www.linkedin.com",
+        "zoom": "https://zoom.us",
+        "teams": "https://teams.microsoft.com",
+        "meet": "https://meet.google.com"
+    }
+
+    if service not in service_urls:
+        return f"Service '{service}' not supported"
+
+    driver = browsers[browser_id]
+    try:
+        driver.get(service_urls[service])
+        WebDriverWait(driver, 30).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        return f"Successfully navigated to {service}"
+    except Exception as e:
+        return f"Failed to navigate to {service}: {e}"
 
 
 def fill_multiple_fields(browser_id: str, fields: list) -> str:

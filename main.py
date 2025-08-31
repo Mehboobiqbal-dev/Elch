@@ -63,6 +63,8 @@ import security
 import social_media
 # import voice_control
 import universal_assistant
+import request_parser
+import service_handlers
 from task_data_manager import task_manager
 from response_formatter import ResponseFormatter
 import json
@@ -705,12 +707,134 @@ def get_browser_status():
         return {
             "status": "success",
             "active_browsers": browsing.get_browser_count(),
-            "browser_ids": list(browsing.browsers.keys())
+            "browser_ids": list(browsing.browsers.keys()),
+            "profiles": list(browsing.browser_profiles.keys())
         }
     except Exception as e:
         return {
             "status": "error",
             "message": f"Failed to get browser status: {str(e)}"
+        }
+
+@app.post('/browsers/create')
+def create_persistent_browser(profile_name: str = "default", user_data_dir: str = None):
+    """Create a persistent browser with saved sessions."""
+    try:
+        result = browsing.create_persistent_browser(profile_name, user_data_dir)
+        return {
+            "status": "success",
+            "message": result,
+            "profile_name": profile_name
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to create persistent browser: {str(e)}"
+        }
+
+@app.post('/service/check-login')
+def check_service_login(service: str, browser_id: str):
+    """Check if user is logged into a specific service."""
+    try:
+        login_status = browsing.check_login_status(browser_id, service)
+        return {
+            "status": "success",
+            "service": service,
+            "browser_id": browser_id,
+            "login_status": login_status
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to check login status: {str(e)}"
+        }
+
+@app.post('/service/navigate')
+def navigate_to_service_endpoint(service: str, browser_id: str):
+    """Navigate to a specific service."""
+    try:
+        result = browsing.navigate_to_service(browser_id, service)
+        return {
+            "status": "success",
+            "message": result,
+            "service": service,
+            "browser_id": browser_id
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to navigate to service: {str(e)}"
+        }
+
+@app.post('/service/send-email')
+def send_email_via_service(service: str, browser_id: str, to: str, subject: str = "", body: str = "", cc: str = None, bcc: str = None):
+    """Send email via supported service."""
+    try:
+        handler = service_handlers.get_service_handler(service, browser_id)
+        if not handler:
+            return {
+                "status": "error",
+                "message": f"Service '{service}' not supported"
+            }
+
+        result = handler.send_email(to, subject, body, cc, bcc)
+        return {
+            "status": "success" if "successfully" in result.lower() else "error",
+            "message": result,
+            "service": service
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to send email: {str(e)}"
+        }
+
+@app.post('/service/start-call')
+def start_call_via_service(service: str, browser_id: str, contact: str):
+    """Start a call via supported service."""
+    try:
+        handler = service_handlers.get_service_handler(service, browser_id)
+        if not handler:
+            return {
+                "status": "error",
+                "message": f"Service '{service}' not supported"
+            }
+
+        result = handler.start_call(contact)
+        return {
+            "status": "success" if "started" in result.lower() else "error",
+            "message": result,
+            "service": service,
+            "contact": contact
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to start call: {str(e)}"
+        }
+
+@app.post('/service/send-message')
+def send_message_via_service(service: str, browser_id: str, contact: str, message: str):
+    """Send message via supported service."""
+    try:
+        handler = service_handlers.get_service_handler(service, browser_id)
+        if not handler:
+            return {
+                "status": "error",
+                "message": f"Service '{service}' not supported"
+            }
+
+        result = handler.send_message(contact, message)
+        return {
+            "status": "success" if "sent" in result.lower() else "error",
+            "message": result,
+            "service": service,
+            "contact": contact
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to send message: {str(e)}"
         }
 
 @app.get('/healthz')
@@ -905,8 +1029,35 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
     
     # Retrieve relevant context from memory if input provided
     if agent_req.user_input:
-        relevant_context = memory.memory_instance.search(agent_req.user_input, k=5) # Get top 5 relevant documents
-        context_str = "\n".join([json.dumps(doc) for _, doc in relevant_context])
+        relevant_context = memory.memory_instance.search(agent_req.user_input, k=10) # Get more documents to filter duplicates
+
+        # Deduplicate context by content and type
+        seen_contents = set()
+        unique_context = []
+        for _, doc in relevant_context:
+            # Ensure we only use hashable values (strings) in the tuple
+            doc_type = doc.get('type', '')
+            doc_content = doc.get('content', '')
+            
+            # Convert to string if it's a dictionary or other non-string type
+            if isinstance(doc_type, dict):
+                doc_type = json.dumps(doc_type, sort_keys=True)
+            elif not isinstance(doc_type, str):
+                doc_type = str(doc_type)
+                
+            if isinstance(doc_content, dict):
+                doc_content = json.dumps(doc_content, sort_keys=True)
+            elif not isinstance(doc_content, str):
+                doc_content = str(doc_content)
+            
+            content_key = (doc_type, doc_content)
+            if content_key not in seen_contents:
+                seen_contents.add(content_key)
+                unique_context.append((_, doc))
+
+        # Limit to top 5 unique documents
+        unique_context = unique_context[:5]
+        context_str = "\n".join([json.dumps(doc) for _, doc in unique_context])
         if context_str:
             print(f"Retrieved context from memory: {context_str}")
 
@@ -952,33 +1103,35 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
 
         await send_log(f"Agent run started for goal: {goal} (run_id={run_id}, resumed_steps={session_obj.current_step})")
 
-        # Check if this is a general question that can be answered directly
+        # Enhanced request processing with service detection
         def classify_question_type(question: str) -> str:
-            """Classify if a question is general knowledge or requires specific tools/browser actions."""
+            """Classify if a question is general knowledge, service request, or requires specific tools/browser actions."""
             classification_prompt = f"""
-            Classify the following user input as either 'general' or 'task':
+            Classify the following user input into one of these categories:
 
             - 'general': Questions about facts, explanations, advice, opinions, or general knowledge that can be answered directly with information
-            - 'task': Requests that require performing actions like browsing websites, filling forms, making purchases, interacting with web applications, or any automated task
+            - 'service': Requests to use web services like Gmail, Skype, Outlook, Slack, etc. (e.g., "send email", "make call", "send message")
+            - 'task': Other requests that require performing actions like browsing websites, filling forms, making purchases, or any automated task
 
             Examples:
             - "What is the capital of France?" → general
             - "Explain quantum physics" → general
-            - "What's the weather today?" → general
+            - "Send email to john@example.com" → service
+            - "Call mom on Skype" → service
             - "Book a flight to Paris" → task
             - "Search for hotels in London" → task
-            - "Fill out this form" → task
-            - "Order pizza online" → task
 
             User input: "{question}"
 
-            Respond with only 'general' or 'task':
+            Respond with only 'general', 'service', or 'task':
             """
 
             try:
                 response = generate_text(classification_prompt).strip().lower()
                 if 'general' in response:
                     return 'general'
+                elif 'service' in response:
+                    return 'service'
                 elif 'task' in response:
                     return 'task'
                 else:
@@ -1015,13 +1168,62 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                 logging.error(f"Failed to generate answer for general question: {e}")
                 return "I'm sorry, I encountered an error while trying to answer your question. Please try again."
 
-        # Check if this is a general question
+        def process_service_request(request_text: str) -> Dict[str, Any]:
+            """Process a service-related request using the request parser."""
+            try:
+                parsed = request_parser.request_parser.parse_request(request_text)
+                if "error" in parsed:
+                    return {"error": parsed["error"]}
+
+                # Generate execution plan
+                plan = request_parser.request_parser.generate_plan(parsed)
+                return plan
+            except Exception as e:
+                logging.error(f"Failed to process service request: {e}")
+                return {"error": f"Failed to process request: {str(e)}"}
+
+        def execute_service_action(service: str, action: str, params: Dict, browser_id: str = None) -> str:
+            """Execute a service-specific action."""
+            try:
+                # Get service handler
+                handler = service_handlers.get_service_handler(service, browser_id)
+                if not handler:
+                    return f"Service '{service}' is not supported yet."
+
+                # Execute action
+                if action == "send_email":
+                    result = handler.send_email(
+                        to=params.get("to", ""),
+                        subject=params.get("subject", ""),
+                        body=params.get("body", ""),
+                        cc=params.get("cc"),
+                        bcc=params.get("bcc")
+                    )
+                elif action == "start_call":
+                    result = handler.start_call(params.get("contact", ""))
+                elif action == "send_message":
+                    result = handler.send_message(
+                        params.get("contact", ""),
+                        params.get("message", "")
+                    )
+                else:
+                    result = f"Action '{action}' is not implemented for {service} yet."
+
+                return result
+
+            except Exception as e:
+                logging.error(f"Failed to execute service action: {e}")
+                return f"Failed to execute action: {str(e)}"
+
+        # Enhanced request processing
         if goal:
             question_type = classify_question_type(goal)
-            if question_type == 'general':
-                await send_log(f"Classified as general question: {goal}")
+            await send_log(f"Request classified as: {question_type}")
 
-                # Get relevant context from memory if available
+            if question_type == 'general':
+                # Handle general questions
+                await send_log(f"Processing general question: {goal}")
+
                 context_str = ""
                 if 'relevant_context' in locals() and relevant_context:
                     context_docs = [doc for _, doc in relevant_context]
@@ -1029,7 +1231,6 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
 
                 answer = answer_general_question(goal, context_str)
 
-                # Save the result to history
                 history.append({
                     "step": len(history) + 1,
                     "action": {"name": "answer_general_question", "params": {"question": goal}},
@@ -1037,7 +1238,6 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                     "thought": f"Answered general question: {goal}"
                 })
 
-                # Update session
                 session_obj.status = 'completed'
                 session_obj.history = json.dumps(history)
                 db.commit()
@@ -1047,6 +1247,90 @@ async def agent_run(request: Request, agent_req: schemas.AgentStateRequest, user
                     message="Answered general question using AI knowledge.",
                     history=history,
                     final_result=answer
+                )
+
+            elif question_type == 'service':
+                # Handle service requests (Gmail, Skype, etc.)
+                await send_log(f"Processing service request: {goal}")
+
+                service_plan = process_service_request(goal)
+                if "error" in service_plan:
+                    return schemas.AgentRunResponse(
+                        status="error",
+                        message=service_plan["error"],
+                        history=history,
+                        final_result=None
+                    )
+
+                # Execute service plan
+                service = service_plan["service"]
+                action = service_plan["action"]
+                params = service_plan["params"]
+
+                await send_log(f"Executing {action} on {service}")
+
+                # Create persistent browser for this service
+                profile_name = f"{service}_profile"
+                create_result = browsing.create_persistent_browser(profile_name)
+
+                if "Error" in create_result or "Failed" in create_result:
+                    return schemas.AgentRunResponse(
+                        status="error",
+                        message=f"Failed to create browser: {create_result}",
+                        history=history,
+                        final_result=None
+                    )
+
+                # Extract browser ID from result - match the actual format from browsing.py
+                browser_id_match = re.search(r"created with ID: ([^.\s]+)", create_result)
+                if browser_id_match:
+                    browser_id = browser_id_match.group(1)
+                    await send_log(f"Using browser ID: {browser_id}")
+                else:
+                    browser_id = f"persistent_{profile_name}_{len(browsers)}"
+                    await send_log(f"Browser ID not found in result, using fallback: {browser_id}")
+
+                # Verify browser exists before navigation
+                if browser_id not in browsing.browsers:
+                    return schemas.AgentRunResponse(
+                        status="error",
+                        message=f"Browser {browser_id} was not created successfully",
+                        history=history,
+                        final_result=None
+                    )
+
+                # Navigate to service
+                nav_result = browsing.navigate_to_service(browser_id, service)
+                await send_log(f"Navigation result: {nav_result}")
+
+                if "not found" in nav_result:
+                    return schemas.AgentRunResponse(
+                        status="error",
+                        message=f"Failed to navigate to {service}: {nav_result}",
+                        history=history,
+                        final_result=None
+                    )
+
+                # Execute service action
+                action_result = execute_service_action(service, action, params, browser_id)
+
+                # Add to history
+                history.append({
+                    "step": len(history) + 1,
+                    "action": {"name": f"{service}_{action}", "params": params},
+                    "result": action_result,
+                    "thought": f"Executed {action} on {service}"
+                })
+
+                session_obj.status = 'completed' if "successfully" in action_result.lower() else 'failed'
+                session_obj.history = json.dumps(history)
+                db.commit()
+
+                return schemas.AgentRunResponse(
+                    status="success" if "successfully" in action_result.lower() else "error",
+                    message=action_result,
+                    history=history,
+                    final_result=action_result
                 )
 
         # Helper: infer latest browser_id from history or currently open browsers

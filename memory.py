@@ -78,16 +78,20 @@ class Memory:
 
     def _generate_external_embedding(self, text: str) -> List[float]:
         """Generate embedding using external service (Gemini) with API key failover."""
-        # Build the list of API keys to try
-        api_keys = []
-        
-        if settings.GEMINI_API_KEYS_LIST:
-            api_keys.extend(settings.GEMINI_API_KEYS_LIST)
-            logging.info(f"Added {len(settings.GEMINI_API_KEYS_LIST)} keys from GEMINI_API_KEYS_LIST for embeddings")
-        
-        if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY not in api_keys:
-            api_keys.append(settings.GEMINI_API_KEY)
-            logging.info(f"Added single GEMINI_API_KEY as backup for embeddings")
+        # Use the same API key manager as the rest of the application
+        try:
+            from gemini import api_key_manager
+            api_keys = api_key_manager.api_keys
+        except ImportError:
+            # Fallback to direct settings loading if gemini module not available
+            api_keys = []
+            if settings.GEMINI_API_KEYS_LIST:
+                api_keys.extend(settings.GEMINI_API_KEYS_LIST)
+                logging.info(f"Added {len(settings.GEMINI_API_KEYS_LIST)} keys from GEMINI_API_KEYS_LIST for embeddings")
+            
+            if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY not in api_keys:
+                api_keys.append(settings.GEMINI_API_KEY)
+                logging.info(f"Added single GEMINI_API_KEY as backup for embeddings")
         
         if not api_keys:
             raise Exception("No Gemini API keys configured for embeddings.")
@@ -100,9 +104,21 @@ class Memory:
         max_retries = getattr(settings, "MAX_RETRIES", 3)
         retry_delay = float(getattr(settings, "INITIAL_RETRY_DELAY", 2.0))
 
+        # Use API key manager for better key selection if available
+        try:
+            from gemini import api_key_manager
+            use_key_manager = True
+        except ImportError:
+            use_key_manager = False
+        
         for i, key in enumerate(api_keys):
             keys_attempted += 1
             key_prefix = key[:10] if len(key) >= 10 else key[:6]
+            
+            # Skip keys with too many failures if using key manager
+            if use_key_manager and api_key_manager.key_failures.get(key, 0) >= 3:
+                logging.warning(f"Skipping key #{i+1} ({key_prefix}...) due to too many failures")
+                continue
             
             for attempt in range(max_retries):
                 try:
@@ -114,6 +130,11 @@ class Memory:
                         content=text,
                         task_type="retrieval_document"
                     )
+                    
+                    # Mark successful usage if using key manager
+                    if use_key_manager:
+                        api_key_manager.mark_key_usage(key)
+                    
                     logging.info(f"✅ Successfully generated embedding using key #{i+1} ({key_prefix}...)")
                     return result['embedding']
                     
@@ -123,12 +144,16 @@ class Memory:
                     # Check for quota/rate limit errors
                     if "quota" in error_msg or "429" in error_msg or "resource_exhausted" in error_msg:
                         quota_exhausted_count += 1
+                        if use_key_manager:
+                            api_key_manager.mark_key_failure(key)
                         logging.warning(f"❌ Gemini embedding quota exceeded for key #{i+1} ({key_prefix}...): {e}")
                         last_exception = e
                         break  # Move to next key
                     
                     # Check for non-retriable errors (argument errors)
                     if any(msg in error_msg for msg in ["invalid argument", "bad request", "400", "unexpected keyword argument"]):
+                        if use_key_manager:
+                            api_key_manager.mark_key_failure(key)
                         logging.error(f"❌ Non-retriable error with key #{i+1} ({key_prefix}...): {e}")
                         last_exception = e
                         break  # Move to next key
@@ -146,6 +171,8 @@ class Memory:
                         continue  # Retry with same key
                     
                     # Other errors or final attempt failed
+                    if use_key_manager:
+                        api_key_manager.mark_key_failure(key)
                     logging.warning(f"❌ Gemini embedding error with key #{i+1} ({key_prefix}...): {e}")
                     last_exception = e
                     break  # Move to next key
